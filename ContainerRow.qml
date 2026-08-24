@@ -196,7 +196,14 @@ Item {
             }
           }
 
+          // The tooltip is where a mouse user discovers the keyboard, so every
+          // one names its key.
           tooltipText: {
+            var key = Model.actionHotkey(modelData)
+            return baseTooltip + (key === "" ? "" : "  (" + key + ")")
+          }
+
+          readonly property string baseTooltip: {
             switch (modelData) {
               case "start": return "Start"
               case "stop": return "Stop"

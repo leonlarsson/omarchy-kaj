@@ -32,6 +32,7 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 | `p` | Pause or resume |
 | `x` | Remove (asks first) |
 | `Ctrl+F` or `/` | Search by name, service, project, or image |
+| `?` | Show every shortcut in the panel |
 | `Esc` | Clear the search, then close the panel |
 
 ## Settings

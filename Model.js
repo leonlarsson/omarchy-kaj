@@ -439,6 +439,38 @@ function cursorIndexForId(list, id, fallbackIndex) {
   return Math.max(0, Math.min(items.length - 1, fallbackIndex))
 }
 
+// The key bound to each action. Tooltips and the help sheet both read this, so
+// a rebind cannot leave one of them advertising a key that no longer works.
+// start and stop share Enter because they are one intent: flip this container.
+function actionHotkey(action) {
+  switch (action) {
+    case "start":
+    case "stop": return "Enter"
+    case "restart": return "r"
+    case "logs": return "o"
+    case "shell": return "s"
+    case "pause":
+    case "unpause": return "p"
+    case "remove": return "x"
+    default: return ""
+  }
+}
+
+// Every binding the panel answers to, in the order it is worth learning them.
+var keyHelp = [
+  { keys: "j  k", what: "Move between containers" },
+  { keys: "h  l", what: "Switch status filter" },
+  { keys: "Enter", what: "Start or stop" },
+  { keys: "r", what: "Restart" },
+  { keys: "o", what: "Logs in a terminal" },
+  { keys: "s", what: "Shell in the container" },
+  { keys: "p", what: "Pause or resume" },
+  { keys: "x", what: "Remove (asks first)" },
+  { keys: "Ctrl+F  /", what: "Search" },
+  { keys: "?", what: "This list" },
+  { keys: "Esc", what: "Clear search, then close" }
+]
+
 // Present tense, because it is shown while the action is still running. A row
 // mid-action must say what is happening to it: `docker stop` can take ten
 // seconds to escalate from SIGTERM to SIGKILL, and a row that only greys out

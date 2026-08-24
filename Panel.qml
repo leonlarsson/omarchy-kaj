@@ -173,6 +173,7 @@ Panel {
     // Covers both "/" and Ctrl+F; see Model.isSearchKey for why Ctrl+F has to
     // be recognised here by its control character rather than as a shortcut.
     if (Model.isSearchKey(text)) { openSearch(); return }
+    if (text === "?") { helpOpen = !helpOpen; return }
     var container = cursorContainer
     if (!container) return
     var action = Model.intendedAction(text, container)
@@ -198,6 +199,7 @@ Panel {
   // to tell an unavailable action from a broken keybind, which is how "x does
   // nothing" becomes a bug report instead of a shrug.
   property string notice: ""
+  property bool helpOpen: false
 
   function flash(message) {
     notice = message
@@ -234,6 +236,7 @@ Panel {
       query = ""
       searchField.text = ""
       searchActive = false
+      helpOpen = false
       resetCursor()
     } else {
       searchActive = false
@@ -285,7 +288,10 @@ Panel {
       // Cancel/Remove stepped the status filter behind the dialog instead.
       blocked: (root.searchActive && searchField.activeFocus) || confirm.opened
 
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.helpOpen) root.helpOpen = false
+        else root.close()
+      }
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
         if (dy !== 0) root.moveCursorBy(dy)
@@ -335,7 +341,7 @@ Panel {
 
             Column {
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(36) - searchButton.width - refreshButton.width - Style.space(42)
+              width: parent.width - Style.space(36) - helpButton.width - searchButton.width - refreshButton.width - Style.space(50)
               spacing: Style.space(2)
 
               Row {
@@ -395,6 +401,17 @@ Panel {
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
               }
+            }
+
+            PanelActionButton {
+              id: helpButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰘥"
+              tooltipText: "Keyboard shortcuts  (?)"
+              foreground: root.helpOpen ? Color.accent : root.contentForeground
+              hoverColor: Color.accent
+              fontFamily: root.contentFontFamily
+              onClicked: root.helpOpen = !root.helpOpen
             }
 
             PanelActionButton {
@@ -458,6 +475,42 @@ Panel {
             Keys.onDownPressed: function (event) {
               root.commitSearch()
               event.accepted = true
+            }
+          }
+
+          // ---- Keyboard shortcuts ------------------------------------------
+
+          Column {
+            width: parent.width
+            visible: root.helpOpen
+            spacing: Style.space(3)
+
+            Repeater {
+              model: Model.keyHelp
+
+              Row {
+                required property var modelData
+                width: parent.width
+                spacing: Style.space(10)
+
+                Text {
+                  width: Style.space(74)
+                  horizontalAlignment: Text.AlignRight
+                  text: modelData.keys
+                  color: Color.accent
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+
+                Text {
+                  text: modelData.what
+                  color: root.dim
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+              }
             }
           }
 
