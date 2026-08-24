@@ -647,6 +647,15 @@ function containerSeverity(container) {
   return "ok"
 }
 
+// A glyph replaces the status dot where the shape itself carries the meaning.
+// Paused is the case that most needs it: a paused container is still "up", so a
+// coloured dot reads as running and the distinction is lost. "" means the dot.
+function statusGlyph(container) {
+  if (!container) return ""
+  if (container.paused) return "󰏤"
+  return ""
+}
+
 var severityRank = { ok: 0, warn: 1, error: 2 }
 
 function rollupSeverity(containers) {

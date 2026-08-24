@@ -159,10 +159,29 @@ Item {
     anchors.rightMargin: Style.space(6)
     spacing: Style.space(9)
 
-    // Status dot. A ring rather than a fill for stopped containers, so state is
-    // legible without relying on colour alone.
-    Rectangle {
+    // Status indicator. A ring rather than a fill for stopped containers, so
+    // state is legible without relying on colour alone, and a glyph in place of
+    // the dot for states whose shape says more than a colour can.
+    Item {
       anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(8)
+      height: width
+
+      readonly property string glyph: Model.statusGlyph(row.container)
+
+      Text {
+        anchors.centerIn: parent
+        visible: parent.glyph !== ""
+        text: parent.glyph
+        color: row.severityColor
+        font.family: row.fontFamily
+        font.pixelSize: Style.font.caption
+        textFormat: Text.PlainText
+      }
+
+    Rectangle {
+      anchors.centerIn: parent
+      visible: parent.glyph === ""
       width: Style.space(8)
       height: width
       radius: width / 2
@@ -181,6 +200,7 @@ Item {
         NumberAnimation { to: 0.25; duration: 620; easing.type: Easing.InOutQuad }
         NumberAnimation { to: 1.0; duration: 620; easing.type: Easing.InOutQuad }
       }
+    }
     }
 
     Column {
