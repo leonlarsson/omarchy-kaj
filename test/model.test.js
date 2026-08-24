@@ -448,3 +448,35 @@ test("search opens on / and on Ctrl+F's control character", () => {
   assert.ok(!model.isSearchKey("r"));
   assert.ok(!model.isSearchKey(""));
 });
+
+// --- Errors -----------------------------------------------------------------
+
+test("a container vanishing mid-refresh is not surfaced as an error", () => {
+  // Exactly what `docker inspect` writes when ids are removed between the
+  // listing and the inspect — the race the two-step snapshot accepts.
+  const noise = [
+    "Error response from daemon: No such container: 62b9493de98f77c7",
+    "Error response from daemon: No such container: 6bfde6546db5dc78",
+    "Error response from daemon: No such container: 50b209ea79bc7487"
+  ].join("\n");
+  assert.equal(model.firstRealError(noise), "");
+  assert.ok(model.isMissingContainerError(noise.split("\n")[0]));
+});
+
+test("a real error is surfaced, and only the first one", () => {
+  const mixed = [
+    "Error response from daemon: No such container: 62b9493de98f77c7",
+    "Error response from daemon: permission denied while trying to connect",
+    "Error response from daemon: something else entirely"
+  ].join("\n");
+  assert.equal(
+    model.firstRealError(mixed),
+    "Error response from daemon: permission denied while trying to connect"
+  );
+});
+
+test("firstRealError caps length and handles empty input", () => {
+  assert.equal(model.firstRealError(""), "");
+  assert.equal(model.firstRealError("   \n  \n"), "");
+  assert.ok(model.firstRealError("x".repeat(500)).length <= 201);
+});

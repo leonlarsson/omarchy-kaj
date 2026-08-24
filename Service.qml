@@ -132,6 +132,9 @@ Item {
   // panel is currently filtered to, so the bar cannot under-report a problem
   // just because a filter is hiding it.
   function applyContainers(list) {
+    // A snapshot that came back is proof the previous failure has passed, so
+    // the error clears itself rather than sitting in the panel forever.
+    lastError = ""
     containers = list
     severity = Model.rollupSeverity(list)
     runningCount = Model.countRunning(list)
@@ -305,7 +308,9 @@ Item {
     }
     stderr: StdioCollector {
       onStreamFinished: {
-        var message = Model.sanitizeLine(text, 300)
+        // Containers removed between listing the ids and inspecting them are
+        // expected; anything else is worth showing.
+        var message = Model.firstRealError(text)
         if (message !== "") root.lastError = message
       }
     }
@@ -322,7 +327,7 @@ Item {
     }
     stderr: StdioCollector {
       onStreamFinished: {
-        var message = Model.sanitizeLine(text, 300)
+        var message = Model.firstRealError(text)
         if (message !== "") root.lastError = message
       }
     }

@@ -310,6 +310,33 @@ function mergeStats(existing, raw) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+// A container disappearing mid-refresh is normal, not an error worth showing.
+// The snapshot is two commands — list the ids, then inspect them — so anything
+// removed in between is reported by the second as "No such container". That is
+// a race the design accepts in exchange for never needing a shell, and the
+// panel should absorb it silently rather than blaming the user for it.
+function isMissingContainerError(line) {
+  return /No such (container|object)/i.test(String(line || ""))
+}
+
+// Docker reports one line per failure, so removing a dozen containers yields a
+// dozen near-identical lines. Show the first thing that actually matters, and
+// only that: a wall of concatenated messages is read as noise and ignored.
+function firstRealError(text, maxLength) {
+  var lines = String(text === undefined || text === null ? "" : text).split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim()
+    if (line === "") continue
+    if (isMissingContainerError(line)) continue
+    return sanitizeLine(line, maxLength === undefined ? 200 : maxLength)
+  }
+  return ""
+}
+
+// ---------------------------------------------------------------------------
 // Search and status filtering
 // ---------------------------------------------------------------------------
 
