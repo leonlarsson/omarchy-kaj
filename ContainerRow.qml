@@ -48,7 +48,7 @@ Item {
   // fixed edge on every row instead of drifting with the name length or the
   // number of buttons a given state happens to offer.
   readonly property real rightReserve: Style.space(150)
-  readonly property bool actionsShown: hasCursor || hover.containsMouse || busy || expanded
+  readonly property bool actionsShown: hasCursor || rowHover.hovered || busy || expanded
 
   readonly property color severityColor: {
     if (severity === "error") return Color.urgent
@@ -69,7 +69,7 @@ Item {
     radius: Style.cornerRadius
     color: row.hasCursor
       ? Style.selectedFillFor(row.foreground, Color.accent)
-      : (hover.containsMouse ? Util.alpha(row.foreground, 0.06) : "transparent")
+      : (rowHover.hovered ? Util.alpha(row.foreground, 0.06) : "transparent")
     Behavior on color { ColorAnimation { duration: 90 } }
 
     // An accent bar on the selected row, so the cursor is legible even where
@@ -144,11 +144,15 @@ Item {
     }
   }
 
-  MouseArea {
-    id: hover
-    anchors.fill: parent
-    hoverEnabled: true
-    acceptedButtons: Qt.NoButton
+  // A HoverHandler rather than a MouseArea, and the difference is the whole
+  // bug: a child MouseArea (every action button has one) takes hover away from
+  // a parent MouseArea, so the moment a button appeared under the pointer the
+  // row stopped counting as hovered, the buttons hid, hover returned to the
+  // row, and they reappeared — flickering many times a second. A HoverHandler
+  // observes the pointer over the row and all its children instead of
+  // competing for it.
+  HoverHandler {
+    id: rowHover
   }
 
   Row {
@@ -289,7 +293,6 @@ Item {
     // Fades out as the actions fade in: they occupy the same slot, and only
     // one of them is useful at a time.
     opacity: row.actionsShown ? 0 : 1
-    Behavior on opacity { NumberAnimation { duration: 90 } }
 
     Text {
       width: parent.width
@@ -318,8 +321,7 @@ Item {
     anchors.right: layout.right
     spacing: Style.space(2)
     opacity: row.actionsShown ? 1 : 0
-    enabled: opacity > 0
-    Behavior on opacity { NumberAnimation { duration: 90 } }
+    enabled: row.actionsShown
 
     PanelActionButton {
       iconText: row.expanded ? "󰅁" : "󰅀"
