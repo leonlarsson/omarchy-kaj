@@ -149,6 +149,7 @@ Panel {
       confirm.confirmText = Model.confirmVerb(action)
       confirm.selectedIndex = 0
       confirm.opened = true
+      Qt.callLater(function () { confirmKeys.forceActiveFocus() })
       return
     }
     kaj.runAction(action, container)
@@ -189,6 +190,8 @@ Panel {
   function clearPending() {
     pendingAction = ""
     pendingContainer = null
+    // Hand keyboard control back to the list.
+    if (opened) keyCatcher.forceActiveFocus()
   }
 
   // A keystroke that cannot act has to say so. Silence leaves the user unable
@@ -277,7 +280,10 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       // While the field has focus every key belongs to it, including j and x.
-      blocked: root.searchActive && searchField.activeFocus
+      // While the confirm dialog is up it owns every key. Without this the
+      // catcher underneath kept interpreting them, so an arrow key aimed at
+      // Cancel/Remove stepped the status filter behind the dialog instead.
+      blocked: (root.searchActive && searchField.activeFocus) || confirm.opened
 
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
@@ -618,6 +624,34 @@ Panel {
     // surface rather than under the Panel root: that root is a zero-sized Item
     // in the bar hierarchy, so anchors.fill there would size the dialog to
     // nothing and the confirmation would silently never appear.
+    // Takes focus for as long as the dialog is open and hands every key to it.
+    // ConfirmDialog has no key handling of its own — it exposes handleKey and
+    // expects the host to call it, which is how the first-party panels drive it.
+    Item {
+      id: confirmKeys
+      anchors.fill: parent
+      z: 11
+      focus: confirm.opened
+      visible: confirm.opened
+
+      Keys.priority: Keys.BeforeItem
+      Keys.onPressed: function (event) {
+        if (!confirm.opened) return
+        // h/j/k/l reach the dialog as plain letters, so they are translated to
+        // the left/right the dialog understands. Anything the dialog does not
+        // claim is swallowed rather than passed down, so no keystroke leaks
+        // through to the list while a confirmation is pending.
+        if (event.text === "h" || event.text === "l"
+            || event.text === "j" || event.text === "k") {
+          confirm.selectedIndex = confirm.selectedIndex === 0 ? 1 : 0
+          event.accepted = true
+          return
+        }
+        confirm.handleKey(event)
+        event.accepted = true
+      }
+    }
+
     ConfirmDialog {
       id: confirm
       anchors.fill: parent
