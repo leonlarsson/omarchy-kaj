@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# Development CLI for Kaj. Builds a scene of containers covering every state the
+# panel renders, and drives state transitions on demand so the event-driven UI
+# can be watched reacting live.
+#
+# Safety rule, enforced in one place: every command that touches a container
+# first requires it to carry the label below. A container without the label
+# cannot be selected, stopped, crashed, or removed by anything in this file,
+# so a real workload can never be caught up in a dev command.
+set -euo pipefail
+
+LABEL_KEY="kaj.dev"
+LABEL="$LABEL_KEY=1"
+IMAGE="${KAJ_DEV_IMAGE:-busybox:latest}"
+PREFIX="kaj-dev-"
+
+die() { echo "kaj: $*" >&2; exit 1; }
+
+require_docker() {
+  command -v docker >/dev/null || die "docker not found"
+  docker version --format '{{.Server.Version}}' >/dev/null 2>&1 \
+    || die "docker daemon not reachable"
+}
+
+require_image() {
+  docker image inspect "$IMAGE" >/dev/null 2>&1 && return
+  echo "pulling $IMAGE"
+  docker pull -q "$IMAGE"
+}
+
+# Accepts either the full name or the bit after kaj-dev-, then refuses anything
+# that is not a seeded container. This is the guard the whole file rests on.
+resolve() {
+  local want="$1" name
+  [[ -n $want ]] || die "expected a container name"
+  name="$want"
+  [[ $name == "$PREFIX"* ]] || name="$PREFIX$want"
+
+  docker container inspect "$name" >/dev/null 2>&1 \
+    || die "no such container: $name"
+
+  local label
+  label=$(docker container inspect "$name" --format "{{index .Config.Labels \"$LABEL_KEY\"}}" 2>/dev/null || true)
+  [[ $label == "1" ]] \
+    || die "refusing to touch '$name': it is not labelled $LABEL"
+
+  printf '%s' "$name"
+}
+
+seeded_ids() { docker ps -aq --filter "label=$LABEL"; }
+
+run() {
+  local name="$1"; shift
+  docker run -d --label "$LABEL" --name "$PREFIX$name" "$@" >/dev/null
+}
+
+compose() {
+  local project="$1" service="$2" name="$3"; shift 3
+  docker run -d --label "$LABEL" \
+    --label "com.docker.compose.project=$project" \
+    --label "com.docker.compose.service=$service" \
+    --name "$PREFIX$name" "$@" >/dev/null
+}
+
+cmd_seed() {
+  require_docker; require_image
+  cmd_clean >/dev/null
+  echo "seeding..."
+
+  # A healthy multi-service project: the common case.
+  compose shop web    shop-web    --no-healthcheck -p 18080:80 "$IMAGE" sleep 86400
+  compose shop api    shop-api    --no-healthcheck "$IMAGE" sleep 86400
+  compose shop worker shop-worker --no-healthcheck "$IMAGE" sleep 86400
+
+  # A project in trouble: one healthy, one failing. Exercises the per-group
+  # severity rollup that turns a project header red.
+  compose blog db    blog-db \
+    --health-cmd 'true' --health-interval 5s --health-retries 1 "$IMAGE" sleep 86400
+  compose blog cache blog-cache \
+    --health-cmd 'false' --health-interval 3s --health-retries 1 "$IMAGE" sleep 86400
+
+  # Container metadata is written by whoever built the image, and Kaj treats it
+  # as untrusted. Docker restricts container *names* to [a-zA-Z0-9][a-zA-Z0-9_.-],
+  # so a hostile name is impossible — but labels are free-form, which makes the
+  # Compose project name the real place arbitrary text arrives. If any of this
+  # ever reaches a shell or a rich-text renderer, this row is where it shows.
+  compose '$(id > /tmp/kaj-pwned); rm -rf /' 'svc<img src=x onerror=alert(1)>' hostile \
+    --no-healthcheck "$IMAGE" sleep 86400
+
+  # Long names, for eliding rather than wrapping.
+  compose 'a-very-long-compose-project-name-that-should-elide-rather-than-wrap' \
+          'an-equally-long-service-name-for-good-measure' long \
+    --no-healthcheck "$IMAGE" sleep 86400
+
+  # One container per standalone state.
+  run solo     --no-healthcheck "$IMAGE" sleep 86400
+  run crashed  --no-healthcheck "$IMAGE" sh -c 'exit 3'
+  run paused   --no-healthcheck "$IMAGE" sleep 86400
+  run starting --health-cmd 'sleep 3600' --health-start-period 3600s \
+    --health-interval 5s "$IMAGE" sleep 86400
+  # Restart-looping: also a stress test, since it emits events constantly.
+  run looping  --no-healthcheck --restart always "$IMAGE" sh -c 'sleep 2; exit 1'
+
+  # Stopped cleanly. It has to exit 0 on its own: `docker stop` on a `sleep`
+  # ends in SIGKILL and exit 137, which the panel would rightly call a problem —
+  # the opposite of what this row exists to prove.
+  run stopped --no-healthcheck "$IMAGE" sh -c 'exit 0'
+  run killed  --no-healthcheck "$IMAGE" sleep 86400
+  docker kill "${PREFIX}killed" >/dev/null
+  docker create --label "$LABEL" --name "${PREFIX}created" --no-healthcheck \
+    "$IMAGE" sleep 86400 >/dev/null
+  docker pause "${PREFIX}paused" >/dev/null
+
+  echo
+  cmd_status
+}
+
+cmd_clean() {
+  require_docker
+  local ids
+  mapfile -t ids < <(seeded_ids)
+  if [[ ${#ids[@]} -eq 0 ]]; then
+    echo "nothing to remove"
+    return 0
+  fi
+  echo "removing ${#ids[@]} seeded container(s)"
+  docker rm -f "${ids[@]}" >/dev/null
+}
+
+cmd_status() {
+  require_docker
+  if [[ -z $(seeded_ids) ]]; then
+    echo "nothing seeded — run: dev/kaj seed"
+    return 0
+  fi
+  docker ps -a --filter "label=$LABEL" \
+    --format 'table {{.Names}}\t{{.State}}\t{{.Status}}'
+}
+
+cmd_crash() {
+  require_image
+  local name; name=$(resolve "${1:-}")
+  local code="${2:-3}"
+
+  # Replacing the container is the only way to get a specific non-zero exit
+  # code. Signalling cannot do it: PID 1 in a namespace ignores every signal
+  # whose disposition is the default unless the process installs a handler,
+  # which is the same reason `docker stop` waits its timeout and then resorts
+  # to SIGKILL. That leaves SIGKILL as the only signal that works, and its
+  # exit code 137 is indistinguishable from an OOM kill — exactly the
+  # distinction the panel exists to draw.
+  local project service
+  project=$(docker inspect "$name" --format \
+    '{{with index .Config.Labels "com.docker.compose.project"}}{{.}}{{end}}')
+  service=$(docker inspect "$name" --format \
+    '{{with index .Config.Labels "com.docker.compose.service"}}{{.}}{{end}}')
+
+  docker rm -f "$name" >/dev/null
+
+  local args=(-d --label "$LABEL" --name "$name" --no-healthcheck)
+  [[ -n $project ]] && args+=(--label "com.docker.compose.project=$project")
+  [[ -n $service ]] && args+=(--label "com.docker.compose.service=$service")
+
+  docker run "${args[@]}" "$IMAGE" sh -c "exit $code" >/dev/null
+  echo "crashed $name (exit $code)"
+}
+
+cmd_oom() {
+  require_docker; require_image
+  local name="${PREFIX}oom"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  # /dev/shm is memory-backed, so filling it counts against the cgroup limit and
+  # the kernel OOM-kills the container — which is what the panel should surface.
+  docker run -d --label "$LABEL" --name "$name" --memory 16m --memory-swap 16m \
+    --no-healthcheck "$IMAGE" \
+    sh -c 'dd if=/dev/zero of=/dev/shm/fill bs=1M count=512' >/dev/null
+  echo "started $name (expect an OOM kill within a few seconds)"
+}
+
+cmd_unhealthy() {
+  require_docker; require_image
+  local name="${PREFIX}unhealthy"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker run -d --label "$LABEL" --name "$name" \
+    --health-cmd 'false' --health-interval 2s --health-retries 1 \
+    "$IMAGE" sleep 86400 >/dev/null
+  echo "started $name (turns unhealthy within a few seconds)"
+}
+
+# Simple passthroughs, each gated by resolve().
+cmd_simple() {
+  local verb="$1" name; name=$(resolve "${2:-}")
+  docker "$verb" "$name" >/dev/null
+  echo "$verb $name"
+}
+
+usage() {
+  cat <<EOF
+Development CLI for Kaj. Only ever touches containers labelled $LABEL.
+
+Usage: dev/kaj <command> [container]
+
+  seed              create a scene covering every state the panel renders
+  clean             remove every seeded container
+  status            list seeded containers
+
+  crash <name> [n]  make a seeded container exit non-zero (default 3)
+  oom               start a container that gets OOM-killed
+  unhealthy         start a container that fails its healthcheck
+  stop <name>       stop, start, restart, pause, unpause a seeded container
+  start <name>
+  restart <name>
+  pause <name>
+  unpause <name>
+
+Container names may omit the ${PREFIX} prefix, so "crash solo" means ${PREFIX}solo.
+EOF
+}
+
+case "${1:-}" in
+  seed) cmd_seed ;;
+  clean) cmd_clean ;;
+  status|ls) cmd_status ;;
+  crash) cmd_crash "${2:-}" "${3:-3}" ;;
+  oom) cmd_oom ;;
+  unhealthy) cmd_unhealthy ;;
+  stop|start|restart|pause|unpause) cmd_simple "$1" "${2:-}" ;;
+  ""|-h|--help|help) usage ;;
+  *) usage; exit 1 ;;
+esac

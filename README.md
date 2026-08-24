@@ -75,12 +75,17 @@ Please open an issue for security reports.
 npm test                    # pure logic, no QML or Docker needed
 omarchy plugin validate .
 
-dev/seed                    # containers covering every state the panel renders
-dev/clean                   # removes only what dev/seed created
+dev/kaj seed                # containers covering every state the panel renders
+dev/kaj status              # list them
+dev/kaj crash solo          # drive a state change and watch the panel react
+dev/kaj oom                 # a container that gets OOM-killed
+dev/kaj unhealthy           # a container that fails its healthcheck
+dev/kaj clean               # remove them all
 ```
 
-`dev/seed` labels everything `kaj.dev=1`, and `dev/clean` removes by that label
-alone, so neither can touch a container you actually care about.
+`dev/kaj --help` lists everything. It labels what it creates `kaj.dev=1` and
+refuses to act on any container without that label, so it cannot touch a
+workload you care about.
 
 `Model.js` holds parsing, grouping, formatting, and policy as pure functions.
 `Service.qml` talks to the daemon. `BarWidget.qml` and `Panel.qml` render.
