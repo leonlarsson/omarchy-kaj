@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "mozzy.kaj",
+  "name": "Kaj",
+  "version": "0.1.0",
+  "author": "Leon San José Larsson",
+  "license": "MIT",
+  "description": "Docker containers in the Omarchy bar: live status, stats, logs, and controls, grouped by Compose project.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Kaj",
+    "description": "Docker containers grouped by Compose project, with live stats, logs, and start/stop/restart controls.",
+    "category": "System",
+    "aliases": ["docker", "containers", "kaj"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "readOnly": false,
+      "showStats": true,
+      "hideStopped": false,
+      "notifyOnExit": true,
+      "refreshIntervalSec": 30,
+      "logLines": 500
+    },
+    "schema": [
+      {
+        "key": "readOnly",
+        "type": "boolean",
+        "label": "Read-only mode",
+        "defaultValue": false,
+        "description": "Show status, stats, and logs but disable every action that changes a container. Useful on machines where the Docker socket is shared or production-adjacent."
+      },
+      {
+        "key": "showStats",
+        "type": "boolean",
+        "label": "Live CPU and memory",
+        "defaultValue": true,
+        "description": "Stream per-container resource usage. Turn off to leave one fewer long-running docker process attached to the daemon."
+      },
+      {
+        "key": "hideStopped",
+        "type": "boolean",
+        "label": "Hide stopped containers",
+        "defaultValue": false
+      },
+      {
+        "key": "notifyOnExit",
+        "type": "boolean",
+        "label": "Notify on crash or OOM",
+        "defaultValue": true,
+        "description": "Send a desktop notification when a container exits non-zero or is killed for running out of memory."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Reconcile interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 30,
+        "description": "Kaj updates from the Docker event stream, so this is only a safety net that re-syncs if an event is ever missed."
+      },
+      {
+        "key": "logLines",
+        "type": "integer",
+        "label": "Log buffer (lines)",
+        "min": 50,
+        "max": 5000,
+        "step": 50,
+        "defaultValue": 500
+      }
+    ]
+  }
+}
