@@ -451,8 +451,13 @@ function statusSummary(container, nowMs) {
     return "Stopped"
   }
   var uptime = formatUptime(container.startedAt, nowMs)
+  // A container still running its healthcheck has not meaningfully been "up"
+  // for anything yet, so the elapsed time is noise. The row pulses its dot
+  // instead, which says "in progress" without pretending to be a measurement.
+  if (container.health === "starting") return "Starting"
+  // Unhealthy keeps its uptime: how long something has been up while failing
+  // its healthcheck is exactly what you want to know.
   if (container.health === "unhealthy") return "Unhealthy" + (uptime ? " · up " + uptime : "")
-  if (container.health === "starting") return "Starting" + (uptime ? " · up " + uptime : "")
   return uptime ? "Up " + uptime : "Running"
 }
 

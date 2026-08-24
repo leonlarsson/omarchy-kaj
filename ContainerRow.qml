@@ -16,6 +16,9 @@ Item {
   property var container: null
   property var stats: null
   property var kaj: null
+  // Driven by the panel's clock so uptime ages in place. Falling back to
+  // Date.now() keeps the row correct if it is ever used without one.
+  property double now: 0
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property bool showStats: true
@@ -71,10 +74,12 @@ Item {
       border.width: row.running ? 0 : 1
       border.color: row.severityColor
 
-      // A restarting container is the one state worth animating: it is
-      // transient, and a still dot would read as settled.
+      // Transient states are the ones worth animating: restarting, and waiting
+      // on a healthcheck. A still dot would read as settled when it is not.
       SequentialAnimation on opacity {
-        running: row.container ? row.container.restarting === true : false
+        running: row.container
+          ? (row.container.restarting === true || row.container.health === "starting")
+          : false
         loops: Animation.Infinite
         NumberAnimation { to: 0.25; duration: 620; easing.type: Easing.InOutQuad }
         NumberAnimation { to: 1.0; duration: 620; easing.type: Easing.InOutQuad }
@@ -98,7 +103,7 @@ Item {
 
       Text {
         width: parent.width
-        text: row.container ? Model.statusSummary(row.container, Date.now()) : ""
+        text: row.container ? Model.statusSummary(row.container, row.now || Date.now()) : ""
         color: row.severity === "error" ? Color.urgent : row.dim
         font.family: row.fontFamily
         font.pixelSize: Style.font.caption

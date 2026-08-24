@@ -37,6 +37,21 @@ Panel {
   property string pendingAction: ""
   property var pendingContainer: null
 
+  // Uptime is derived from a fixed startedAt, so nothing in the container data
+  // changes as it ages. Without a clock of its own the label would sit at
+  // whatever it read when the list was last rebuilt — which is why it could
+  // show "Up 5s" long after the fact while live stats kept moving. Ticking only
+  // while the panel is open keeps a closed panel completely idle.
+  property double nowMs: Date.now()
+
+  Timer {
+    running: root.opened
+    interval: 1000
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.nowMs = Date.now()
+  }
+
   function scrollPanel(delta) {
     panelFlick.contentY = Math.max(
       0,
@@ -279,6 +294,7 @@ Panel {
                   container: modelData
                   stats: root.kaj ? root.kaj.statsFor(modelData) : null
                   kaj: root.kaj
+                  now: root.nowMs
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
                   showStats: root.showStats

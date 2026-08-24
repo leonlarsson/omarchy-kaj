@@ -274,6 +274,27 @@ test("formatBytes and formatPercent stay short enough for a bar popup", () => {
   assert.equal(model.formatPercent(42.7), "43%");
 });
 
+test("statusSummary omits uptime while a healthcheck is still starting", () => {
+  const now = 1000000000000;
+  const starting = container({ health: "starting", startedAt: now - 90 * 1000 });
+  // No elapsed time: it has not meaningfully been "up" for anything yet.
+  assert.equal(model.statusSummary(starting, now), "Starting");
+
+  // Unhealthy keeps its uptime — how long it has been failing is the point.
+  const unhealthy = container({ health: "unhealthy", startedAt: now - 90 * 1000 });
+  assert.equal(model.statusSummary(unhealthy, now), "Unhealthy · up 1m");
+});
+
+test("uptime advances with the clock it is given", () => {
+  const started = 1000000000000;
+  const c = container({ startedAt: started });
+  // The bug this guards: a fixed startedAt means the label only moves if the
+  // caller passes a current timestamp.
+  assert.equal(model.statusSummary(c, started + 5 * 1000), "Up 5s");
+  assert.equal(model.statusSummary(c, started + 5 * 60 * 1000), "Up 5m");
+  assert.equal(model.statusSummary(c, started + 2 * 3600 * 1000), "Up 2h 0m");
+});
+
 test("statusSummary leads with the reason a container is not running", () => {
   assert.equal(model.statusSummary(container({ oomKilled: true })), "Out of memory");
   assert.equal(model.statusSummary(container({ running: false, exitCode: 137 })), "Exited (137)");
