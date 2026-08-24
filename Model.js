@@ -52,59 +52,37 @@ function sanitizeLine(text, maxLength) {
 }
 
 // ---------------------------------------------------------------------------
-// Secrets
+// Environment
 // ---------------------------------------------------------------------------
 
-// Container environment is where people keep database passwords and API keys.
-// A panel that renders them by default leaks them to anyone glancing at the
-// screen, and to every screenshot and screen recording. Kaj masks first and
-// reveals only on an explicit click, so the default state is the safe one.
-var secretKeyPattern = /(PASS|PASSWD|PASSWORD|SECRET|TOKEN|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|AUTH|SESSION|COOKIE|SALT|CIPHER|SIGNING|WEBHOOK|DSN|CONNECTION_STRING)/i
-// Values that look like secrets even under an innocent key name.
-var secretValuePattern = /^(eyJ[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{12,})/
+// Every value is hidden until asked for. Kaj deliberately does not try to guess
+// which keys are secret: any such rule is a list of the names someone thought
+// of, and the one it misses is the one that leaks. DATABASE_URL, S3_ENDPOINT and
+// a plain PORT can each carry something private, so the safe default is the same
+// for all of them, and revealing is always a deliberate act.
 
-function isSensitiveEnvKey(key) {
-  return secretKeyPattern.test(String(key || ""))
-}
-
-function isSensitiveEnvValue(value) {
-  return secretValuePattern.test(String(value || ""))
-}
-
-// Split a raw "KEY=value" entry as Docker reports it. Only the first "=" is a
-// separator; values routinely contain more.
+// Only the first "=" separates; values routinely contain more.
 function splitEnvEntry(entry) {
   var text = String(entry === undefined || entry === null ? "" : entry)
   var index = text.indexOf("=")
   if (index < 0) return { key: sanitizeLine(text), value: "" }
-  return { key: sanitizeLine(text.slice(0, index)), value: text.slice(index + 1) }
+  return { key: sanitizeLine(text.slice(0, index)), value: sanitizeLine(text.slice(index + 1), 512) }
 }
 
-// Returns a display record. `masked` is what the UI shows until the user asks
-// to reveal; `value` stays available for the copy action but is never rendered
-// while masked is true.
-function envEntry(entry) {
-  var parts = splitEnvEntry(entry)
-  var sensitive = isSensitiveEnvKey(parts.key) || isSensitiveEnvValue(parts.value)
-  return {
-    key: parts.key,
-    value: sanitizeLine(parts.value, 512),
-    sensitive: sensitive,
-    masked: sensitive ? maskValue(parts.value) : sanitizeLine(parts.value, 512)
-  }
-}
-
-// Keep a hint of length so "is it set at all?" is answerable without revealing.
+// A fixed-width mask: the real length is itself a hint about the value, so it
+// is not reproduced. An unset value stays visibly empty, which is worth knowing
+// and gives nothing away.
 function maskValue(value) {
-  var text = String(value === undefined || value === null ? "" : value)
-  if (text === "") return ""
-  return "••••••••"
+  return String(value === undefined || value === null ? "" : value) === "" ? "" : "••••••••"
 }
 
 function envEntries(list) {
   var out = []
-  if (!Array.isArray(list)) return out
-  for (var i = 0; i < list.length; i++) out.push(envEntry(list[i]))
+  if (!list || list.length === undefined) return out
+  for (var i = 0; i < list.length; i++) {
+    var parts = splitEnvEntry(list[i])
+    out.push({ key: parts.key, value: parts.value, masked: maskValue(parts.value) })
+  }
   return out
 }
 
@@ -491,6 +469,7 @@ var keyHelp = [
   { keys: "s", what: "Shell in the container" },
   { keys: "p", what: "Pause or resume" },
   { keys: "x", what: "Remove (asks first)" },
+  { keys: "e", what: "Environment variables" },
   { keys: "Ctrl+F  /", what: "Search" },
   { keys: "?", what: "This list" },
   { keys: "Esc", what: "Clear search, then close" }

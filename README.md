@@ -31,6 +31,7 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 | `s` | Shell |
 | `p` | Pause or resume |
 | `x` | Remove (asks first) |
+| `e` | Show environment variables |
 | `Ctrl+F` or `/` | Search by name, service, project, or image |
 | `?` | Show every shortcut in the panel |
 | `Esc` | Clear the search, then close the panel |
@@ -61,6 +62,9 @@ process, so it is written accordingly.
   `{{json .Field}}` and every key is a literal.
 - Container-controlled text is rendered as `Text.PlainText` with escape
   sequences and control bytes stripped.
+- Environment variables are fetched only for the row you expand, and every
+  value is hidden until you click it. Kaj does not try to guess which keys are
+  secret: the one such a rule misses is the one that leaks.
 - Removing a container asks first, and the prompt names what is deleted and
   what is kept. Start, stop, and restart do not prompt.
 - Kaj never calls `sudo` or `pkexec`.

@@ -174,6 +174,7 @@ Panel {
     // be recognised here by its control character rather than as a shortcut.
     if (Model.isSearchKey(text)) { openSearch(); return }
     if (text === "?") { helpOpen = !helpOpen; return }
+    if (text === "e") { toggleExpanded(cursorContainer); return }
     var container = cursorContainer
     if (!container) return
     var action = Model.intendedAction(text, container)
@@ -200,6 +201,35 @@ Panel {
   // nothing" becomes a bug report instead of a shrug.
   property string notice: ""
   property bool helpOpen: false
+  // Only one row is expanded at a time: the panel is a bar popup, not a table.
+  property string expandedId: ""
+  // Reveals live here rather than in the row for the same reason expandedId
+  // does: rows are recreated on every refresh, panel state is not.
+  property var revealedKeys: ({})
+
+  function toggleReveal(key) {
+    var next = ({})
+    for (var existing in revealedKeys) next[existing] = revealedKeys[existing]
+    if (next[key]) delete next[key]
+    else next[key] = true
+    revealedKeys = next
+  }
+
+  function toggleExpanded(container) {
+    if (!container) return
+    if (expandedId === container.id) {
+      if (kaj) kaj.forgetEnv(container.id)
+      expandedId = ""
+      revealedKeys = ({})
+      return
+    }
+    if (kaj) {
+      if (expandedId !== "") kaj.forgetEnv(expandedId)
+      kaj.loadEnv(container)
+    }
+    revealedKeys = ({})
+    expandedId = container.id
+  }
 
   function flash(message) {
     notice = message
@@ -642,6 +672,12 @@ Panel {
                   stats: root.kaj ? root.kaj.statsFor(modelData) : null
                   kaj: root.kaj
                   now: root.nowMs
+                  expanded: root.expandedId === modelData.id
+                  env: root.kaj && root.expandedId === modelData.id
+                    ? root.kaj.envById[modelData.id] || null : null
+                  revealed: root.revealedKeys
+                  onToggleExpandRequested: root.toggleExpanded(modelData)
+                  onRevealToggled: function (key) { root.toggleReveal(key) }
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
                   showStats: root.showStats

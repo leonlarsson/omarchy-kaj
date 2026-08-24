@@ -29,8 +29,16 @@ Item {
   // Keyboard cursor. Distinct from hover so a mouse passing over the panel
   // never looks like a selection the keyboard would act on.
   property bool hasCursor: false
+  property bool expanded: false
+  property var env: null
+  // Which keys are currently revealed. Owned by the panel, not by this row:
+  // the list Repeater rebuilds its delegates on every refresh, so anything
+  // kept here is destroyed along with the row a few seconds after the user
+  // clicks — which looked exactly like the reveal spontaneously undoing itself.
+  property var revealed: ({})
 
   signal actionRequested(string action)
+  signal toggleExpandRequested()
 
   readonly property string severity: Model.containerSeverity(container)
   readonly property bool running: container ? container.running === true : false
@@ -44,9 +52,15 @@ Item {
   }
 
   implicitHeight: layout.implicitHeight + Style.space(10)
+    + (expanded ? envBlock.implicitHeight + Style.space(8) : 0)
+
+  signal revealToggled(string key)
 
   Rectangle {
-    anchors.fill: parent
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    height: layout.implicitHeight + Style.space(10)
     radius: Style.cornerRadius
     color: row.hasCursor
       ? Style.selectedFillFor(row.foreground, Color.accent)
@@ -66,6 +80,65 @@ Item {
     }
   }
 
+  // Environment, shown only while the row is expanded.
+  Column {
+    id: envBlock
+    visible: row.expanded
+    anchors.top: layout.bottom
+    anchors.topMargin: Style.space(6)
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.leftMargin: Style.space(23)
+    anchors.rightMargin: Style.space(6)
+    spacing: Style.space(2)
+
+    Text {
+      visible: !row.env || row.env.length === 0
+      text: row.env ? "No environment variables" : "Loading…"
+      color: row.dim
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.caption
+      textFormat: Text.PlainText
+    }
+
+    Repeater {
+      model: row.expanded && row.env ? row.env : []
+
+      Row {
+        required property var modelData
+        readonly property bool shown: row.revealed[modelData.key] === true
+
+        width: envBlock.width
+        spacing: Style.space(8)
+
+        Text {
+          text: modelData.key
+          color: Util.alpha(row.foreground, 0.8)
+          font.family: row.fontFamily
+          font.pixelSize: Style.font.caption
+          textFormat: Text.PlainText
+        }
+
+        Text {
+          width: envBlock.width - x
+          text: shown ? modelData.value : modelData.masked
+          color: shown ? row.foreground : row.dim
+          font.family: row.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+          textFormat: Text.PlainText
+
+          MouseArea {
+            anchors.fill: parent
+            anchors.margins: -Style.space(2)
+            cursorShape: Qt.PointingHandCursor
+            onClicked: row.revealToggled(modelData.key)
+          }
+        }
+      }
+    }
+  }
+
   MouseArea {
     id: hover
     anchors.fill: parent
@@ -77,7 +150,11 @@ Item {
     id: layout
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.verticalCenter: parent.verticalCenter
+    // Pinned to the top rather than centred: an expanded row grows downward,
+    // and centring would push the container's own line into the middle of its
+    // own environment list.
+    anchors.top: parent.top
+    anchors.topMargin: Style.space(5)
     anchors.leftMargin: Style.space(6)
     anchors.rightMargin: Style.space(6)
     spacing: Style.space(9)
@@ -201,6 +278,16 @@ Item {
       id: actionRow
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(2)
+
+      PanelActionButton {
+        iconText: row.expanded ? "󰅁" : "󰅀"
+        tooltipText: "Environment variables  (e)"
+        foreground: row.expanded ? Color.accent : row.foreground
+        hoverColor: Color.accent
+        fontFamily: row.fontFamily
+        fontSize: Style.font.caption
+        onClicked: row.toggleExpandRequested()
+      }
 
       Repeater {
         model: row.actions

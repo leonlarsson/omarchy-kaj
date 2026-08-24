@@ -51,35 +51,27 @@ test("a shell-injection container name survives as inert text", () => {
 
 // --- Secrets ----------------------------------------------------------------
 
-test("sensitive env keys are detected regardless of case", () => {
-  assert.ok(model.isSensitiveEnvKey("DB_PASSWORD"));
-  assert.ok(model.isSensitiveEnvKey("api_key"));
-  assert.ok(model.isSensitiveEnvKey("STRIPE_SECRET"));
-  assert.ok(model.isSensitiveEnvKey("SESSION_COOKIE"));
-  assert.ok(!model.isSensitiveEnvKey("NODE_ENV"));
-  assert.ok(!model.isSensitiveEnvKey("PORT"));
+test("every env value is hidden by default", () => {
+  const entries = model.envEntries([
+    "NODE_ENV=production",
+    "DB_PASSWORD=hunter2",
+    "EMPTY="
+  ]);
+  // No key is treated as more sensitive than another: guessing is what leaks.
+  assert.equal(entries[0].masked, "••••••••");
+  assert.equal(entries[1].masked, "••••••••");
+  // The real value stays available for the reveal, but is not what renders.
+  assert.equal(entries[1].value, "hunter2");
+  // An unset value reads as unset, which gives nothing away.
+  assert.equal(entries[2].masked, "");
+  // The mask is fixed width, so it does not leak the length either.
+  assert.equal(entries[0].masked, entries[1].masked);
 });
 
-test("secret-shaped values are caught even under an innocent key", () => {
-  assert.ok(model.isSensitiveEnvValue("ghp_abcdefghijklmnopqrst"));
-  assert.ok(model.isSensitiveEnvValue("sk-abcdefghijklmnopqrstuv"));
-  assert.ok(model.isSensitiveEnvValue("eyJhbGciOiJIUzI1NiJ9xxxx"));
-  assert.ok(!model.isSensitiveEnvValue("production"));
-});
-
-test("env entries mask by default and split only on the first =", () => {
-  const entry = model.envEntry("DATABASE_URL=postgres://u:p@h/db?x=1");
-  assert.equal(entry.key, "DATABASE_URL");
-  assert.equal(entry.value, "postgres://u:p@h/db?x=1");
-
-  const secret = model.envEntry("DB_PASSWORD=hunter2");
-  assert.equal(secret.sensitive, true);
-  assert.equal(secret.masked, "••••••••");
-  assert.ok(!secret.masked.includes("hunter2"));
-
-  const ordinary = model.envEntry("NODE_ENV=production");
-  assert.equal(ordinary.sensitive, false);
-  assert.equal(ordinary.masked, "production");
+test("env splits on the first = only", () => {
+  const e = model.envEntries(["DATABASE_URL=postgres://u:p@h/db?x=1"])[0];
+  assert.equal(e.key, "DATABASE_URL");
+  assert.equal(e.value, "postgres://u:p@h/db?x=1");
 });
 
 // --- Parsing ----------------------------------------------------------------

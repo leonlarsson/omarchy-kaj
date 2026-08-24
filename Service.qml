@@ -142,6 +142,43 @@ Item {
   }
 
 
+  // ---- Environment ---------------------------------------------------------
+
+  // Fetched only when a row is expanded, and dropped when it collapses. The
+  // main snapshot deliberately does not carry Env: holding every container's
+  // secrets in memory for the lifetime of the shell, to render them almost
+  // never, is a poor trade.
+  property var envById: ({})
+
+  function loadEnv(container) {
+    if (!container || envProcess.running) return
+    envProcess.containerId = container.id
+    envProcess.command = ["docker", "inspect", "--type", "container",
+                          "--format", "{{json .Config.Env}}", container.id]
+    envProcess.running = true
+  }
+
+  function forgetEnv(id) {
+    var next = ({})
+    for (var key in envById) if (key !== String(id)) next[key] = envById[key]
+    envById = next
+  }
+
+  Process {
+    id: envProcess
+    property string containerId: ""
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var rows = Model.parseJsonLines(text)
+        var next = ({})
+        for (var key in root.envById) next[key] = root.envById[key]
+        next[envProcess.containerId] = Model.envEntries(rows.length > 0 ? rows[0] : [])
+        root.envById = next
+      }
+    }
+  }
+
   // ---- Actions -------------------------------------------------------------
 
   // Which containers have an action in flight, as id -> verb. A map rather than
