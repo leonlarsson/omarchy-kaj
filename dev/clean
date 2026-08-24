@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Removes everything dev/seed created, and nothing else.
+#
+# The filter is the whole safety story: containers are selected by the label
+# seed applied, never by a name pattern and never by "everything that is
+# stopped". A real container without that label cannot be matched here.
+set -euo pipefail
+
+LABEL="kaj.dev=1"
+
+command -v docker >/dev/null || { echo "docker not found" >&2; exit 1; }
+docker version --format '{{.Server.Version}}' >/dev/null 2>&1 \
+  || { echo "docker daemon not reachable" >&2; exit 1; }
+
+mapfile -t ids < <(docker ps -aq --filter "label=$LABEL")
+
+if [[ ${#ids[@]} -eq 0 ]]; then
+  echo "nothing to remove"
+  exit 0
+fi
+
+echo "removing ${#ids[@]} seeded container(s)"
+docker rm -f "${ids[@]}" >/dev/null
+echo "done"

@@ -4,7 +4,9 @@
   "private": true,
   "description": "Docker containers in the Omarchy bar: live status, stats, logs, and controls, grouped by Compose project.",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "seed": "dev/seed",
+    "clean": "dev/clean"
   },
   "license": "MIT"
 }

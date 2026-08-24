@@ -74,7 +74,13 @@ Please open an issue for security reports.
 ```bash
 npm test                    # pure logic, no QML or Docker needed
 omarchy plugin validate .
+
+dev/seed                    # containers covering every state the panel renders
+dev/clean                   # removes only what dev/seed created
 ```
+
+`dev/seed` labels everything `kaj.dev=1`, and `dev/clean` removes by that label
+alone, so neither can touch a container you actually care about.
 
 `Model.js` holds parsing, grouping, formatting, and policy as pure functions.
 `Service.qml` talks to the daemon. `BarWidget.qml` and `Panel.qml` render.
