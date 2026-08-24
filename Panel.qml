@@ -47,8 +47,23 @@ Panel {
 
   readonly property var allContainers: kaj ? kaj.containers : []
   readonly property var counts: Model.statusCounts(allContainers, query)
-  readonly property var groups: Model.groupByProject(
-    Model.filterContainers(allContainers, query, statusFilter))
+  // Replaced only when the set or order of rows changes, so a container merely
+  // changing state does not rebuild every delegate. See Model.groupsKey.
+  property var groups: []
+  property string groupsKey: ""
+
+  function rebuildGroups() {
+    var next = Model.groupByProject(Model.filterContainers(allContainers, query, statusFilter))
+    var key = Model.groupsKey(next)
+    if (key === groupsKey) return
+    groupsKey = key
+    groups = next
+  }
+
+  onAllContainersChanged: rebuildGroups()
+  onQueryChanged: rebuildGroups()
+  onStatusFilterChanged: rebuildGroups()
+  Component.onCompleted: rebuildGroups()
   // The flat sequence the keyboard walks. Groups are a visual convenience, so
   // j from the last row of one project lands on the first row of the next.
   readonly property var flatContainers: Model.flattenGroups(groups)
@@ -64,8 +79,13 @@ Panel {
   // three rows down, and the selection must stay on the container you chose.
   property string cursorId: ""
 
-  readonly property var cursorContainer: cursorActive && cursorIndex >= 0
-    && cursorIndex < flatContainers.length ? flatContainers[cursorIndex] : null
+  // The cached list supplies the id; the container itself is looked up live, so
+  // Enter never acts on a state that has since changed.
+  readonly property var cursorContainer: {
+    if (!cursorActive || cursorIndex < 0 || cursorIndex >= flatContainers.length) return null
+    if (!kaj) return null
+    return kaj.containerById(flatContainers[cursorIndex].id)
+  }
 
   onFlatContainersChanged: {
     if (!cursorActive) return
@@ -661,10 +681,12 @@ Panel {
                 width: parent.width
                 // Compose project name, or a plain label for the containers
                 // that belong to no project.
+                readonly property var stats: Model.groupStats(root.allContainers, modelData.project)
+
                 text: modelData.standalone
                   ? "CONTAINERS"
-                  : (modelData.project + "  ·  " + modelData.running + "/" + modelData.total)
-                foreground: modelData.severity === "error" ? Color.urgent : root.contentForeground
+                  : (modelData.project + "  ·  " + stats.running + "/" + stats.total)
+                foreground: stats.severity === "error" ? Color.urgent : root.contentForeground
                 fontFamily: root.contentFontFamily
               }
 
@@ -676,15 +698,17 @@ Panel {
                   required property var modelData
 
                   width: content.width
-                  container: modelData
-                  stats: root.kaj ? root.kaj.statsFor(modelData) : null
+                  // Only the id comes from the cached row list; the data is
+                  // looked up live so a stable list still shows fresh state.
+                  container: root.kaj ? root.kaj.containerById(modelData.id) : null
+                  stats: root.kaj && container ? root.kaj.statsFor(container) : null
                   kaj: root.kaj
                   now: root.nowMs
                   expanded: root.expandedId === modelData.id
                   env: root.kaj && root.expandedId === modelData.id
                     ? root.kaj.envById[modelData.id] || null : null
                   revealed: root.revealedKeys
-                  onToggleExpandRequested: root.toggleExpanded(modelData)
+                  onToggleExpandRequested: root.toggleExpanded(container)
                   onRevealToggled: function (key) { root.toggleReveal(key) }
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
@@ -695,7 +719,7 @@ Panel {
                     && root.cursorContainer.id === modelData.id
 
                   onHasCursorChanged: if (hasCursor) root.ensureVisible(containerRow)
-                  onActionRequested: function (action) { root.requestAction(action, modelData) }
+                  onActionRequested: function (action) { root.requestAction(action, container) }
                 }
               }
             }

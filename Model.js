@@ -419,6 +419,35 @@ function flattenGroups(groups) {
   return out
 }
 
+// Identity of a rendered list: which containers, in which order. The panel
+// rebuilds its rows only when this changes, never merely because a container's
+// data did. A Repeater destroys and recreates every delegate when its model is
+// replaced, and each row rebuilt that way loses its hover — so with one
+// restart-looping container emitting an event every couple of seconds, every
+// tooltip in the panel flickered. Row data reaches the rows through bindings
+// instead, which update in place.
+function groupsKey(groups) {
+  var parts = []
+  var list = Array.isArray(groups) ? groups : []
+  for (var i = 0; i < list.length; i++) {
+    parts.push(list[i].project)
+    var containers = list[i].containers || []
+    for (var j = 0; j < containers.length; j++) parts.push(containers[j].id)
+  }
+  return parts.join("\u0000")
+}
+
+// Header numbers for one project, read live from the full container list so a
+// stable row list does not leave the counts stale.
+function groupStats(containers, project) {
+  var list = Array.isArray(containers) ? containers : []
+  var mine = []
+  for (var i = 0; i < list.length; i++) {
+    if ((list[i].project || "") === project) mine.push(list[i])
+  }
+  return { running: countRunning(mine), total: mine.length, severity: rollupSeverity(mine) }
+}
+
 // Clamps rather than wraps. Wrapping a short list makes j feel like it did
 // nothing; stopping at the end says "that is all of them".
 function moveCursor(index, delta, length) {
