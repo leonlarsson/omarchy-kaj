@@ -38,6 +38,12 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 | `?` | Show every shortcut in the panel |
 | `Esc` | Clear the search, then close the panel |
 
+## Views
+
+Containers, Images, and Disk. Images lists what is on disk largest first and
+flags anything no container uses; Disk is `docker system df`, with whatever is
+reclaimable called out.
+
 ## Compose projects
 
 Hovering a project header reveals `start`, `stop`, `restart`, and `down`, run as

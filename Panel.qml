@@ -44,6 +44,29 @@ Panel {
   property string query: ""
   property bool searchActive: false
   property string statusFilter: "all"
+  property string view: "containers"
+
+  function setView(next) {
+    if (view === next) return
+    view = next
+    resetCursor()
+    query = ""
+    searchField.text = ""
+    searchActive = false
+    if (kaj) {
+      if (next === "images") kaj.loadImages()
+      else if (next === "disk") kaj.loadDisk()
+    }
+  }
+
+  function stepView(delta) {
+    var index = Model.views.indexOf(view)
+    if (index < 0) index = 0
+    var next = index + delta
+    if (next < 0) next = Model.views.length - 1
+    if (next >= Model.views.length) next = 0
+    setView(Model.views[next])
+  }
 
   readonly property var allContainers: kaj ? kaj.containers : []
   readonly property var counts: Model.statusCounts(allContainers, query)
@@ -300,6 +323,7 @@ Panel {
   // left over from last time.
   onOpenedChanged: {
     if (opened) {
+      view = "containers"
       statusFilter = kaj ? kaj.defaultFilter : "all"
       query = ""
       searchField.text = ""
@@ -371,7 +395,12 @@ Panel {
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
         if (dy !== 0) root.moveCursorBy(dy)
-        else if (dx !== 0) root.stepFilter(dx)
+        else if (dx !== 0) {
+          // Left/right steps whatever the current view offers: status filters
+          // in the container list, and the views themselves elsewhere.
+          if (root.view === "containers") root.stepFilter(dx)
+          else root.stepView(dx)
+        }
       }
       onActivateRequested: root.activateCursor()
       onDeleteRequested: root.removeCursor()
@@ -590,12 +619,36 @@ Panel {
             }
           }
 
+          // ---- View tabs ---------------------------------------------------
+
+          Row {
+            width: parent.width
+            spacing: Style.space(4)
+            visible: root.reachable
+
+            Repeater {
+              model: Model.views
+
+              Button {
+                required property string modelData
+
+                text: Model.viewLabel(modelData)
+                selected: root.view === modelData
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                fontSize: Style.font.caption
+                onClicked: root.setView(modelData)
+              }
+            }
+          }
+
           // ---- Status filter chips -----------------------------------------
 
           Row {
             width: parent.width
             spacing: Style.space(5)
-            visible: root.reachable && root.hasContainers
+            visible: root.reachable && root.hasContainers && root.view === "containers"
 
             Repeater {
               model: Model.statusFilters
@@ -667,7 +720,7 @@ Panel {
 
           Text {
             width: parent.width
-            visible: root.reachable && !root.probing
+            visible: root.reachable && !root.probing && root.view === "containers"
               && root.flatContainers.length === 0
             text: {
               if (!root.hasContainers) return "No containers yet."
@@ -687,7 +740,7 @@ Panel {
           // ---- Groups ------------------------------------------------------
 
           Repeater {
-            model: root.groups
+            model: root.view === "containers" ? root.groups : []
 
             Column {
               required property var modelData
@@ -806,6 +859,158 @@ Panel {
                 }
               }
             }
+          }
+
+          // ---- Images ------------------------------------------------------
+
+          Column {
+            width: parent.width
+            spacing: Style.space(3)
+            visible: root.view === "images" && root.reachable
+
+            Text {
+              width: parent.width
+              visible: root.kaj && root.kaj.images.length === 0
+              text: root.kaj && root.kaj.loadingImages ? "Loading…" : "No images."
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              textFormat: Text.PlainText
+            }
+
+            Repeater {
+              model: root.view === "images" && root.kaj
+                ? Model.filterImages(root.kaj.images, root.query) : []
+
+              Row {
+                required property var modelData
+                width: parent.width
+                spacing: Style.space(8)
+
+                Column {
+                  width: parent.width - sizeText.width - Style.space(8)
+                  spacing: Style.space(1)
+
+                  Text {
+                    width: parent.width
+                    text: modelData.name
+                    // A dangling image has no name worth trusting, so it reads
+                    // as muted rather than pretending to be a real tag.
+                    color: modelData.dangling ? root.dim : root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+
+                  Text {
+                    width: parent.width
+                    // Whether anything uses it is the only question worth
+                    // answering here: an unused image is one you can delete.
+                    text: modelData.id + "  ·  " + modelData.created
+                      + (modelData.containers === 0
+                         ? "  ·  unused"
+                         : "  ·  " + modelData.containers
+                           + (modelData.containers === 1 ? " container" : " containers"))
+                    color: modelData.containers === 0 ? Color.accent : root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+                }
+
+                Text {
+                  id: sizeText
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(62)
+                  horizontalAlignment: Text.AlignRight
+                  text: Model.formatBytes(modelData.size)
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+              }
+            }
+          }
+
+          // ---- Disk --------------------------------------------------------
+
+          Column {
+            width: parent.width
+            spacing: Style.space(5)
+            visible: root.view === "disk" && root.reachable
+
+            Repeater {
+              model: root.view === "disk" && root.kaj ? root.kaj.disk : []
+
+              Row {
+                required property var modelData
+                width: parent.width
+                spacing: Style.space(8)
+
+                Column {
+                  width: parent.width - Style.space(156)
+                  spacing: Style.space(1)
+
+                  Text {
+                    text: modelData.type
+                    color: root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.body
+                    textFormat: Text.PlainText
+                  }
+
+                  Text {
+                    text: modelData.active + " of " + modelData.total + " in use"
+                    color: root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    textFormat: Text.PlainText
+                  }
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(66)
+                  horizontalAlignment: Text.AlignRight
+                  text: Model.formatBytes(modelData.size)
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(66)
+                  horizontalAlignment: Text.AlignRight
+                  // Reclaimable is the number people act on, so it is the one
+                  // that gets the accent when there is anything to reclaim.
+                  text: modelData.reclaimable > 0
+                    ? Model.formatBytes(modelData.reclaimable) + " free"
+                    : "—"
+                  color: modelData.reclaimable > 0 ? Color.accent : root.dim
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+              }
+            }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.view === "disk" && root.reachable && root.kaj
+              && Model.totalReclaimable(root.kaj.disk) > 0
+            text: root.kaj
+              ? Model.formatBytes(Model.totalReclaimable(root.kaj.disk)) + " can be reclaimed"
+              : ""
+            color: Color.accent
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
           }
 
           // ---- Errors ------------------------------------------------------

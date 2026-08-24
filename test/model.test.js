@@ -543,3 +543,44 @@ test("compose down is confirmed and names what goes", () => {
   assert.ok(text.includes("network"));
   assert.ok(text.includes("volumes are kept"));
 });
+
+// --- Images and disk --------------------------------------------------------
+
+test("dangling images are named rather than shown as <none>", () => {
+  const tagged = model.normalizeImage({ ID: "269abb53b32d", Repository: "busybox", Tag: "latest", Size: "6.73MB", Containers: "15" });
+  assert.equal(tagged.name, "busybox:latest");
+  assert.equal(tagged.dangling, false);
+  assert.equal(tagged.containers, 15);
+  assert.ok(Math.abs(tagged.size - 6.73e6) < 1e4);
+
+  const dangling = model.normalizeImage({ ID: "abc123", Repository: "<none>", Tag: "<none>", Size: "12MB", Containers: "0" });
+  assert.equal(dangling.dangling, true);
+  assert.equal(dangling.name, "untagged");
+});
+
+test("images sort largest first", () => {
+  const list = model.normalizeImages([
+    { ID: "a", Repository: "small", Tag: "1", Size: "5MB", Containers: "0" },
+    { ID: "b", Repository: "big", Tag: "1", Size: "500MB", Containers: "0" }
+  ]);
+  assert.deepEqual(plain(list.map(i => i.name)), ["big:1", "small:1"]);
+});
+
+test("disk rows parse counts and reclaimable size", () => {
+  const rows = model.normalizeDisk([
+    { Type: "Images", TotalCount: "2", Active: "2", Size: "90.32MB", Reclaimable: "0B (0%)" },
+    { Type: "Build Cache", TotalCount: "9", Active: "0", Size: "1.2GB", Reclaimable: "1.2GB (100%)" }
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].total, 2);
+  assert.equal(rows[0].reclaimable, 0);
+  assert.ok(Math.abs(rows[1].reclaimable - 1.2e9) < 1e6);
+  assert.ok(Math.abs(model.totalReclaimable(rows) - 1.2e9) < 1e6);
+});
+
+test("image search matches name and id", () => {
+  const image = model.normalizeImage({ ID: "269abb53b32d", Repository: "dungfu/twitch-drops-miner", Tag: "latest", Size: "83.6MB", Containers: "1" });
+  assert.ok(model.matchesImageQuery(image, "twitch"));
+  assert.ok(model.matchesImageQuery(image, "269abb"));
+  assert.ok(!model.matchesImageQuery(image, "postgres"));
+});

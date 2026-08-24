@@ -142,6 +142,47 @@ Item {
   }
 
 
+  // ---- Images and disk -----------------------------------------------------
+
+  // Fetched when the view is opened and on explicit refresh, not streamed:
+  // images and disk usage change on the scale of builds and pulls, so a live
+  // subscription would cost two more processes to show numbers that rarely move.
+  property var images: []
+  property var disk: []
+  property bool loadingImages: false
+
+  function loadImages() {
+    if (!daemonReachable || imagesProcess.running) return
+    loadingImages = true
+    imagesProcess.command = ["docker", "images", "--format", "{{json .}}"]
+    imagesProcess.running = true
+  }
+
+  function loadDisk() {
+    if (!daemonReachable || diskProcess.running) return
+    diskProcess.command = ["docker", "system", "df", "--format", "{{json .}}"]
+    diskProcess.running = true
+  }
+
+  Process {
+    id: imagesProcess
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.images = Model.normalizeImages(Model.parseJsonLines(text))
+        root.loadingImages = false
+      }
+    }
+  }
+
+  Process {
+    id: diskProcess
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: root.disk = Model.normalizeDisk(Model.parseJsonLines(text))
+    }
+  }
+
   // ---- Environment ---------------------------------------------------------
 
   // Fetched only when a row is expanded, and dropped when it collapses. The

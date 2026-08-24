@@ -500,6 +500,7 @@ var keyHelp = [
   { keys: "x", what: "Remove (asks first)" },
   { keys: "e", what: "Environment variables" },
   { keys: "Ctrl+F  /", what: "Search" },
+  { keys: "h  l", what: "Switch view (Containers, Images, Disk)" },
   { keys: "?", what: "This list" },
   { keys: "Esc", what: "Clear search, then close" }
 ]
@@ -701,6 +702,104 @@ function composeConfirmText(project, running, total) {
   return "Run docker compose down on " + project + "? "
     + total + (total === 1 ? " container" : " containers")
     + " and the project network are removed. Named volumes are kept."
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
+var views = ["containers", "images", "disk"]
+
+function viewLabel(view) {
+  if (view === "images") return "Images"
+  if (view === "disk") return "Disk"
+  return "Containers"
+}
+
+// ---------------------------------------------------------------------------
+// Images and disk
+// ---------------------------------------------------------------------------
+
+// An image with no repository is dangling: an old layer set orphaned by a
+// rebuild that took its tag. They are the bulk of what reclaimable space
+// usually is, so they are named rather than shown as "<none>:<none>".
+function normalizeImage(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var repository = sanitizeLine(raw.Repository || "")
+  var tag = sanitizeLine(raw.Tag || "")
+  var dangling = repository === "" || repository === "<none>"
+  return {
+    id: shortId(raw.ID),
+    repository: dangling ? "" : repository,
+    tag: dangling ? "" : (tag === "<none>" ? "" : tag),
+    dangling: dangling,
+    name: dangling ? "untagged" : (repository + (tag && tag !== "<none>" ? ":" + tag : "")),
+    size: parseSize(raw.Size),
+    sizeText: sanitizeLine(raw.Size || ""),
+    created: sanitizeLine(raw.CreatedSince || ""),
+    // How many containers reference it. Zero means nothing would break if it
+    // went, which is the only question worth answering in a bar popup.
+    containers: parseInt(raw.Containers, 10) || 0
+  }
+}
+
+function normalizeImages(list) {
+  var out = []
+  if (!list || list.length === undefined) return out
+  for (var i = 0; i < list.length; i++) {
+    var image = normalizeImage(list[i])
+    if (image && image.id !== "") out.push(image)
+  }
+  // Largest first: the reason to open this view is to find what is big.
+  out.sort(function (a, b) { return b.size - a.size })
+  return out
+}
+
+// `docker system df` reports one row per type. Reclaimable arrives as
+// "1.2GB (34%)", so the number is parsed out and the percentage dropped.
+function normalizeDiskRow(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var reclaimable = String(raw.Reclaimable || "")
+  return {
+    type: sanitizeLine(raw.Type || ""),
+    total: parseInt(raw.TotalCount, 10) || 0,
+    active: parseInt(raw.Active, 10) || 0,
+    size: parseSize(raw.Size),
+    reclaimable: parseSize(reclaimable.split(" ")[0])
+  }
+}
+
+function normalizeDisk(list) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length; i++) {
+    var row = normalizeDiskRow(list[i])
+    if (row && row.type !== "") out.push(row)
+  }
+  return out
+}
+
+function totalReclaimable(rows) {
+  var total = 0
+  var list = Array.isArray(rows) ? rows : []
+  for (var i = 0; i < list.length; i++) total += list[i].reclaimable
+  return total
+}
+
+function matchesImageQuery(image, query) {
+  if (!image) return false
+  var needle = String(query === undefined || query === null ? "" : query).trim().toLowerCase()
+  if (needle === "") return true
+  return (image.name + " " + image.id).toLowerCase().indexOf(needle) !== -1
+}
+
+function filterImages(images, query) {
+  var out = []
+  var list = Array.isArray(images) ? images : []
+  for (var i = 0; i < list.length; i++) {
+    if (matchesImageQuery(list[i], query)) out.push(list[i])
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
