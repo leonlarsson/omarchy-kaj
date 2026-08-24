@@ -433,12 +433,31 @@ Item {
   // alert, which is the fastest way to teach someone to ignore the alerts.
   readonly property var quietExitCodes: [0, 130, 143]
 
+  // A container in a restart loop dies every few seconds. Notifying on each one
+  // buries the desktop in identical popups and makes the notification worthless
+  // precisely when something is actually wrong, so each container gets one
+  // notification per cooldown window no matter how often it flaps.
+  property var _lastNotified: ({})
+  readonly property int notifyCooldownMs: 60000
+
+  function shouldNotify(id) {
+    var key = String(id)
+    var last = _lastNotified[key]
+    if (last !== undefined && (Date.now() - last) < notifyCooldownMs) return false
+    var next = ({})
+    for (var existing in _lastNotified) next[existing] = _lastNotified[existing]
+    next[key] = Date.now()
+    _lastNotified = next
+    return true
+  }
+
   function announceExit(event) {
     var attributes = event.Actor && event.Actor.Attributes ? event.Actor.Attributes : {}
     var exitCode = parseInt(attributes.exitCode, 10)
     if (!isFinite(exitCode)) return
     if (quietExitCodes.indexOf(exitCode) !== -1) return
     if (wasSelfInitiated(event.id)) return
+    if (!shouldNotify(event.id)) return
 
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
     // Normal urgency, so it behaves like a notification rather than a modal:
