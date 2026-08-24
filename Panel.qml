@@ -53,6 +53,7 @@ Panel {
     query = ""
     searchField.text = ""
     searchActive = false
+    keyCatcher.forceActiveFocus()
     if (kaj) {
       if (next === "images") kaj.loadImages()
       else if (next === "disk") kaj.loadDisk()
@@ -325,6 +326,7 @@ Panel {
     if (opened) {
       view = "containers"
       statusFilter = kaj ? kaj.defaultFilter : "all"
+      keyCatcher.forceActiveFocus()
       query = ""
       searchField.text = ""
       searchActive = false
@@ -552,6 +554,10 @@ Panel {
             id: searchField
             width: parent.width
             visible: root.searchActive
+            // Disabled when hidden so it cannot hold focus: a focused invisible
+            // field both captured typing into the query and left the key
+            // catcher unblocked, so every keystroke was handled twice.
+            enabled: root.searchActive
             height: visible ? implicitHeight : 0
             placeholderText: "Filter by name, service, project, or image"
             foreground: root.contentForeground
@@ -559,6 +565,7 @@ Panel {
             font.family: root.contentFontFamily
 
             onTextChanged: {
+              if (!root.searchActive) return
               root.query = text
               root.resetCursor()
             }
