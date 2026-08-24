@@ -44,6 +44,11 @@ Item {
   readonly property bool running: container ? container.running === true : false
   readonly property var actions: Model.availableActions(container)
   readonly property color dim: Util.alpha(foreground, 0.6)
+  // Stats and actions share one right-anchored slot, so both sit at the same
+  // fixed edge on every row instead of drifting with the name length or the
+  // number of buttons a given state happens to offer.
+  readonly property real rightReserve: Style.space(150)
+  readonly property bool actionsShown: hasCursor || hover.containsMouse || busy || expanded
 
   readonly property color severityColor: {
     if (severity === "error") return Color.urgent
@@ -205,7 +210,7 @@ Item {
 
     Column {
       anchors.verticalCenter: parent.verticalCenter
-      width: layout.width - Style.space(8) - actionRow.width - statsColumn.width - Style.space(36)
+      width: layout.width - Style.space(8) - Style.space(9) - row.rightReserve
       spacing: Style.space(1)
 
       Text {
@@ -266,104 +271,120 @@ Item {
 
     // Live usage. Fixed width so rows stay aligned as numbers change instead of
     // jittering the action buttons left and right.
-    Column {
-      id: statsColumn
-      anchors.verticalCenter: parent.verticalCenter
-      visible: row.showStats && row.running && row.stats !== null
-      width: visible ? Style.space(62) : 0
-      spacing: Style.space(1)
 
-      Text {
-        width: parent.width
-        horizontalAlignment: Text.AlignRight
-        text: row.stats ? Model.formatPercent(row.stats.cpu) + " cpu" : ""
-        color: row.dim
-        font.family: row.fontFamily
-        font.pixelSize: Style.font.caption
-        textFormat: Text.PlainText
-      }
+    // Actions stay hidden until the row is hovered or holds the keyboard
+    // cursor. Six buttons on every row turned the panel into a wall of icons,
+    // and only one row is ever being acted on. Opacity rather than visibility,
+    // so the space stays reserved and the stats column does not shift as the
+    // pointer moves down the list.
+  }
 
-      Text {
-        width: parent.width
-        horizontalAlignment: Text.AlignRight
-        text: row.stats ? Model.formatBytes(row.stats.memUsed) : ""
-        color: row.dim
-        font.family: row.fontFamily
-        font.pixelSize: Style.font.caption
-        textFormat: Text.PlainText
-      }
+  Column {
+    id: statsColumn
+    anchors.verticalCenter: layout.verticalCenter
+    anchors.right: layout.right
+    visible: row.showStats && row.running && row.stats !== null
+    width: Style.space(62)
+    spacing: Style.space(1)
+    // Fades out as the actions fade in: they occupy the same slot, and only
+    // one of them is useful at a time.
+    opacity: row.actionsShown ? 0 : 1
+    Behavior on opacity { NumberAnimation { duration: 90 } }
+
+    Text {
+      width: parent.width
+      horizontalAlignment: Text.AlignRight
+      text: row.stats ? Model.formatPercent(row.stats.cpu) + " cpu" : ""
+      color: row.dim
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.caption
+      textFormat: Text.PlainText
     }
 
-    Row {
-      id: actionRow
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(2)
+    Text {
+      width: parent.width
+      horizontalAlignment: Text.AlignRight
+      text: row.stats ? Model.formatBytes(row.stats.memUsed) : ""
+      color: row.dim
+      font.family: row.fontFamily
+      font.pixelSize: Style.font.caption
+      textFormat: Text.PlainText
+    }
+  }
+
+  Row {
+    id: actionRow
+    anchors.verticalCenter: layout.verticalCenter
+    anchors.right: layout.right
+    spacing: Style.space(2)
+    opacity: row.actionsShown ? 1 : 0
+    enabled: opacity > 0
+    Behavior on opacity { NumberAnimation { duration: 90 } }
+
+    PanelActionButton {
+      iconText: row.expanded ? "󰅁" : "󰅀"
+      tooltipText: "Environment variables  (e)"
+      foreground: row.expanded ? Color.accent : row.foreground
+      hoverColor: Color.accent
+      fontFamily: row.fontFamily
+      fontSize: Style.font.caption
+      onClicked: row.toggleExpandRequested()
+    }
+
+    Repeater {
+      model: row.actions
 
       PanelActionButton {
-        iconText: row.expanded ? "󰅁" : "󰅀"
-        tooltipText: "Environment variables  (e)"
-        foreground: row.expanded ? Color.accent : row.foreground
-        hoverColor: Color.accent
+        required property string modelData
+
+        readonly property bool destructive: Model.isDestructive(modelData)
+        // Read-only mode disables mutation but deliberately leaves logs and
+        // shell alone: reading is the thing read-only mode is for.
+        readonly property bool inspectOnly: modelData === "logs" || modelData === "shell"
+
+        iconText: {
+          switch (modelData) {
+            case "start": return "󰐊"
+            case "stop": return "󰓛"
+            case "restart": return "󰑐"
+            case "pause": return "󰏤"
+            case "unpause": return "󰐊"
+            case "remove": return "󰩹"
+            case "logs": return "󰈙"
+            case "shell": return "󰆍"
+            default: return "󰋼"
+          }
+        }
+
+        // The tooltip is where a mouse user discovers the keyboard, so every
+        // one names its key.
+        tooltipText: {
+          var key = Model.actionHotkey(modelData)
+          return baseTooltip + (key === "" ? "" : "  (" + key + ")")
+        }
+
+        readonly property string baseTooltip: {
+          switch (modelData) {
+            case "start": return "Start"
+            case "stop": return "Stop"
+            case "restart": return "Restart"
+            case "pause": return "Pause"
+            case "unpause": return "Resume"
+            case "remove": return "Remove container"
+            case "logs": return "Follow logs in a terminal"
+            case "shell": return "Open a shell in this container"
+            default: return modelData
+          }
+        }
+
+        enabled: !row.busy && (inspectOnly || !row.readOnly)
+        opacity: enabled ? 1.0 : 0.35
+        foreground: destructive ? Color.urgent : row.foreground
+        hoverColor: destructive ? Color.urgent : Color.accent
         fontFamily: row.fontFamily
         fontSize: Style.font.caption
-        onClicked: row.toggleExpandRequested()
-      }
 
-      Repeater {
-        model: row.actions
-
-        PanelActionButton {
-          required property string modelData
-
-          readonly property bool destructive: Model.isDestructive(modelData)
-          // Read-only mode disables mutation but deliberately leaves logs and
-          // shell alone: reading is the thing read-only mode is for.
-          readonly property bool inspectOnly: modelData === "logs" || modelData === "shell"
-
-          iconText: {
-            switch (modelData) {
-              case "start": return "󰐊"
-              case "stop": return "󰓛"
-              case "restart": return "󰑐"
-              case "pause": return "󰏤"
-              case "unpause": return "󰐊"
-              case "remove": return "󰩹"
-              case "logs": return "󰈙"
-              case "shell": return "󰆍"
-              default: return "󰋼"
-            }
-          }
-
-          // The tooltip is where a mouse user discovers the keyboard, so every
-          // one names its key.
-          tooltipText: {
-            var key = Model.actionHotkey(modelData)
-            return baseTooltip + (key === "" ? "" : "  (" + key + ")")
-          }
-
-          readonly property string baseTooltip: {
-            switch (modelData) {
-              case "start": return "Start"
-              case "stop": return "Stop"
-              case "restart": return "Restart"
-              case "pause": return "Pause"
-              case "unpause": return "Resume"
-              case "remove": return "Remove container"
-              case "logs": return "Follow logs in a terminal"
-              case "shell": return "Open a shell in this container"
-              default: return modelData
-            }
-          }
-
-          enabled: !row.busy && (inspectOnly || !row.readOnly)
-          opacity: enabled ? 1.0 : 0.35
-          foreground: destructive ? Color.urgent : row.foreground
-          hoverColor: destructive ? Color.urgent : Color.accent
-          fontFamily: row.fontFamily
-          fontSize: Style.font.caption
-
-          onClicked: row.actionRequested(modelData)
-        }
+        onClicked: row.actionRequested(modelData)
       }
     }
   }

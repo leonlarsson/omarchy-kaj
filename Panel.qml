@@ -706,6 +706,15 @@ Panel {
                 readonly property string busyVerb: root.kaj && !modelData.standalone
                   ? root.kaj.busyAction(root.kaj.composeBusyKey(modelData.project)) : ""
 
+                // Same rule as the container rows: project actions appear when
+                // the group is hovered, not permanently.
+                MouseArea {
+                  id: groupHover
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  acceptedButtons: Qt.NoButton
+                }
+
                 PanelSectionHeader {
                   id: groupHeader
                   anchors.left: parent.left
@@ -736,6 +745,9 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(2)
                   visible: !groupBar.standalone && !root.readOnly
+                  opacity: groupHover.containsMouse || groupBar.busyVerb !== "" ? 1 : 0
+                  enabled: opacity > 0
+                  Behavior on opacity { NumberAnimation { duration: 90 } }
 
                   Repeater {
                     model: ["start", "stop", "restart", "down"]
