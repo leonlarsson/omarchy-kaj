@@ -201,6 +201,33 @@ Item {
     busyActions = next
   }
 
+  // Group actions share the per-target busy map, keyed by project rather than
+  // container id, so a project mid-action disables its own header without
+  // touching anything else.
+  function composeBusyKey(project) { return "compose:" + project }
+
+  function composeAction(project, verb) {
+    if (!daemonReachable) return
+    if (readOnly) { lastError = "Read-only mode is on"; return }
+    var command = Model.composeCommand(project, verb)
+    if (!command) return
+    var key = composeBusyKey(project)
+    if (busyAction(key) !== "") return
+
+    lastError = ""
+    // Every container in the project is about to stop because it was asked to.
+    for (var i = 0; i < containers.length; i++) {
+      if ((containers[i].project || "") === project) markSelfInitiated(containers[i].id)
+    }
+
+    var proc = actionComponent.createObject(root, {
+      containerId: key, verb: verb, command: command
+    })
+    if (!proc) { lastError = "Could not run compose " + verb; return }
+    setBusy(key, verb)
+    proc.running = true
+  }
+
   // The single mutation entry point. Every button in the UI routes here.
   function runAction(action, container) {
     if (!container || !daemonReachable) return

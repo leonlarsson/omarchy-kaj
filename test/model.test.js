@@ -521,3 +521,25 @@ test("linkablePorts keeps only what can actually be opened", () => {
   assert.deepEqual(plain(links), [{ port: 8080, url: "http://localhost:8080" }]);
   assert.deepEqual(plain(model.linkablePorts(container({}))), []);
 });
+
+// --- Compose ----------------------------------------------------------------
+
+test("compose commands address the project by name", () => {
+  assert.deepEqual(plain(model.composeCommand("shop", "stop")),
+    ["docker", "compose", "--project-name", "shop", "stop"]);
+  assert.deepEqual(plain(model.composeCommand("shop", "down")),
+    ["docker", "compose", "--project-name", "shop", "down"]);
+  // up needs the config file, which Kaj cannot rely on still existing.
+  assert.equal(model.composeCommand("shop", "up"), null);
+  assert.equal(model.composeCommand("", "stop"), null);
+  assert.equal(model.composeCommand("shop", "rm -rf"), null);
+});
+
+test("compose down is confirmed and names what goes", () => {
+  assert.ok(model.isDestructive("down"));
+  const text = model.composeConfirmText("shop", 2, 3);
+  assert.ok(text.includes("shop"));
+  assert.ok(text.includes("3 containers"));
+  assert.ok(text.includes("network"));
+  assert.ok(text.includes("volumes are kept"));
+});

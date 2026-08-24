@@ -38,6 +38,14 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 | `?` | Show every shortcut in the panel |
 | `Esc` | Clear the search, then close the panel |
 
+## Compose projects
+
+Hovering a project header reveals `start`, `stop`, `restart`, and `down`, run as
+real `docker compose --project-name <name> <verb>` commands rather than as a
+loop over containers, so networks and dependency order are Compose's to handle.
+`down` is confirmed first. `up` is not offered: it needs the compose file, which
+Kaj cannot rely on still being where it was.
+
 ## Settings
 
 Set per widget in the Omarchy settings panel, or in `~/.config/omarchy/shell.json`.

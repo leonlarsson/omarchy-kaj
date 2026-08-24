@@ -669,6 +669,41 @@ function rollupSeverity(containers) {
 }
 
 // ---------------------------------------------------------------------------
+// Compose
+// ---------------------------------------------------------------------------
+
+// Group actions go through `docker compose`, not through a loop over the
+// containers Kaj happens to know about. Compose owns concepts the container
+// list cannot see — networks, dependency order, which services belong to the
+// project at all — and reimplementing it by fanning out `docker stop` would
+// quietly diverge from what `docker compose stop` does in the same directory.
+//
+// `-p <project>` is enough for these four: Compose v2 finds an existing
+// project's containers by label, so they work from any working directory
+// without the compose file. `up` deliberately is not here — it needs the
+// config file, which Kaj cannot depend on still being where it was.
+var composeVerbs = ["start", "stop", "restart", "down"]
+
+function composeCommand(project, verb) {
+  if (!project || project === "") return null
+  if (composeVerbs.indexOf(verb) === -1) return null
+  return ["docker", "compose", "--project-name", project, verb]
+}
+
+function composeBusyLabel(verb) {
+  if (verb === "down") return "Removing project…"
+  return busyLabel(verb)
+}
+
+// down removes containers and the project network, so it is confirmed like any
+// other destructive verb, and the prompt says what goes beyond the containers.
+function composeConfirmText(project, running, total) {
+  return "Run docker compose down on " + project + "? "
+    + total + (total === 1 ? " container" : " containers")
+    + " and the project network are removed. Named volumes are kept."
+}
+
+// ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
 
@@ -755,7 +790,8 @@ function availableActions(container) {
 // people to click through dialogs, which is how the destructive one gets
 // clicked through too.
 function isDestructive(action) {
-  return action === "remove" || action === "removeVolumes" || action === "prune" || action === "recreate"
+  return action === "remove" || action === "removeVolumes" || action === "prune"
+    || action === "recreate" || action === "down"
 }
 
 // Human-readable consequence, shown in the confirm dialog. Never assembled from

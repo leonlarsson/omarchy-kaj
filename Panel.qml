@@ -175,6 +175,23 @@ Panel {
     kaj.runAction(action, container)
   }
 
+  function requestCompose(project, verb, stats) {
+    if (!kaj || project === "") return
+    if (verb === "down") {
+      pendingCompose = project
+      pendingAction = "down"
+      confirm.message = Model.composeConfirmText(project, stats.running, stats.total)
+      confirm.confirmText = "Remove"
+      confirm.selectedIndex = 0
+      confirm.opened = true
+      Qt.callLater(function () { confirmKeys.forceActiveFocus() })
+      return
+    }
+    kaj.composeAction(project, verb)
+  }
+
+  property string pendingCompose: ""
+
   function activateCursor() {
     var container = cursorContainer
     if (!container) return
@@ -212,6 +229,7 @@ Panel {
   function clearPending() {
     pendingAction = ""
     pendingContainer = null
+    pendingCompose = ""
     // Hand keyboard control back to the list.
     if (opened) keyCatcher.forceActiveFocus()
   }
@@ -677,17 +695,74 @@ Panel {
               width: content.width
               spacing: Style.space(4)
 
-              PanelSectionHeader {
+              Item {
+                id: groupBar
                 width: parent.width
-                // Compose project name, or a plain label for the containers
-                // that belong to no project.
-                readonly property var stats: Model.groupStats(root.allContainers, modelData.project)
+                height: groupHeader.implicitHeight
 
-                text: modelData.standalone
-                  ? "CONTAINERS"
-                  : (modelData.project + "  ·  " + stats.running + "/" + stats.total)
-                foreground: stats.severity === "error" ? Color.urgent : root.contentForeground
-                fontFamily: root.contentFontFamily
+                readonly property var project: modelData.project
+                readonly property bool standalone: modelData.standalone
+                readonly property var stats: Model.groupStats(root.allContainers, modelData.project)
+                readonly property string busyVerb: root.kaj && !modelData.standalone
+                  ? root.kaj.busyAction(root.kaj.composeBusyKey(modelData.project)) : ""
+
+                PanelSectionHeader {
+                  id: groupHeader
+                  anchors.left: parent.left
+                  anchors.right: composeRow.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  // Compose project name, or a plain label for the containers
+                  // that belong to no project.
+                  text: groupBar.standalone
+                    ? "CONTAINERS"
+                    : (groupBar.project + "  ·  "
+                       + (groupBar.busyVerb !== ""
+                          ? Model.composeBusyLabel(groupBar.busyVerb)
+                          : groupBar.stats.running + "/" + groupBar.stats.total))
+                  foreground: groupBar.busyVerb !== ""
+                    ? Color.accent
+                    : (groupBar.stats.severity === "error" ? Color.urgent : root.contentForeground)
+                  fontFamily: root.contentFontFamily
+                  elide: Text.ElideRight
+                }
+
+                // Whole-project actions, run through docker compose rather than
+                // by fanning out per-container commands: compose owns networks
+                // and dependency order, which a loop over containers does not.
+                Row {
+                  id: composeRow
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+                  visible: !groupBar.standalone && !root.readOnly
+
+                  Repeater {
+                    model: ["start", "stop", "restart", "down"]
+
+                    PanelActionButton {
+                      required property string modelData
+
+                      readonly property bool destructive: modelData === "down"
+                      iconText: {
+                        switch (modelData) {
+                          case "start": return "󰐊"
+                          case "stop": return "󰓛"
+                          case "restart": return "󰑐"
+                          default: return "󰹩"
+                        }
+                      }
+                      tooltipText: "docker compose " + modelData
+                      enabled: groupBar.busyVerb === ""
+                      opacity: enabled ? 1.0 : 0.35
+                      foreground: destructive ? Color.urgent : root.dim
+                      hoverColor: destructive ? Color.urgent : Color.accent
+                      fontFamily: root.contentFontFamily
+                      fontSize: Style.font.caption
+                      onClicked: root.requestCompose(groupBar.project, modelData, groupBar.stats)
+                    }
+                  }
+                }
               }
 
               Repeater {
