@@ -439,3 +439,12 @@ test("letter shortcuts never fire an action the buttons would not offer", () => 
   assert.equal(model.actionForKey("o", stopped), "logs");
   assert.equal(model.actionForKey("z", running), "");
 });
+
+test("search opens on / and on Ctrl+F's control character", () => {
+  assert.ok(model.isSearchKey("/"));
+  // Qt puts the ASCII control code for F in event.text for Ctrl+F.
+  assert.ok(model.isSearchKey("\x06"));
+  assert.ok(!model.isSearchKey("f"));
+  assert.ok(!model.isSearchKey("r"));
+  assert.ok(!model.isSearchKey(""));
+});

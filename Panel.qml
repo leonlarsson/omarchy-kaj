@@ -168,7 +168,9 @@ Panel {
   }
 
   function handleTextKey(text) {
-    if (text === "/") { openSearch(); return }
+    // Covers both "/" and Ctrl+F; see Model.isSearchKey for why Ctrl+F has to
+    // be recognised here by its control character rather than as a shortcut.
+    if (Model.isSearchKey(text)) { openSearch(); return }
     var container = cursorContainer
     if (!container) return
     var action = Model.actionForKey(text, container)
@@ -217,13 +219,6 @@ Panel {
   // Ctrl+F as a real shortcut rather than sniffing for the raw control byte the
   // key catcher would otherwise deliver through textKey. Gated on `opened` so
   // it cannot fire while the panel is closed.
-  Shortcut {
-    // `sequences` rather than `sequence`: StandardKey.Find carries more than
-    // one binding, and binding only the first is what Qt warns about.
-    sequences: [StandardKey.Find]
-    enabled: root.opened
-    onActivated: root.openSearch()
-  }
 
   function scrollPanel(delta) {
     panelFlick.contentY = Math.max(

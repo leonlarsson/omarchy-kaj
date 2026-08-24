@@ -421,6 +421,21 @@ function primaryAction(container) {
   return container.running ? "stop" : "start"
 }
 
+// Which keystrokes open search. "/" is the plain character; Ctrl+F arrives as
+// the ASCII control code for F (0x06), because that is what Qt puts in
+// event.text and PanelKeyCatcher forwards event.text verbatim.
+//
+// Neither of the tidier routes works here. A QtQuick Shortcut never fires:
+// Qt only delivers shortcuts to an active window, and a Quickshell layer-shell
+// surface is never "active" in that sense — which is why nothing in the whole
+// Omarchy shell uses one. Handling it on a parent item does not work either,
+// because a QML KeyEvent arrives already accepted, so PanelKeyCatcher swallows
+// every key it does not recognise instead of letting it bubble.
+function isSearchKey(text) {
+  if (text === "/") return true
+  return String(text === undefined || text === null ? "" : text).charCodeAt(0) === 6
+}
+
 // Single-letter shortcuts, checked against what the container supports so a
 // key never fires an action the buttons would not have offered. h/j/k/l and x
 // are consumed by PanelKeyCatcher before Kaj sees them, so they are absent
