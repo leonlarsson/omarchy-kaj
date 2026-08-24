@@ -560,7 +560,7 @@ Panel {
                   fontFamily: root.contentFontFamily
                   showStats: root.showStats
                   readOnly: root.readOnly
-                  busy: root.kaj ? root.kaj.busyContainerId === modelData.id : false
+                  busyVerb: root.kaj ? root.kaj.busyAction(modelData.id) : ""
                   hasCursor: root.cursorContainer
                     && root.cursorContainer.id === modelData.id
 

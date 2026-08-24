@@ -480,3 +480,11 @@ test("firstRealError caps length and handles empty input", () => {
   assert.equal(model.firstRealError("   \n  \n"), "");
   assert.ok(model.firstRealError("x".repeat(500)).length <= 201);
 });
+
+test("busyLabel describes the action in progress", () => {
+  assert.equal(model.busyLabel("stop"), "Stopping…");
+  assert.equal(model.busyLabel("restart"), "Restarting…");
+  assert.equal(model.busyLabel("unpause"), "Resuming…");
+  assert.equal(model.busyLabel("removeVolumes"), "Removing…");
+  assert.equal(model.busyLabel("mystery"), "Working…");
+});

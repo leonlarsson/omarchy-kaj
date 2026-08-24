@@ -40,7 +40,6 @@ Item {
   property int runningCount: 0
   property int totalCount: 0
   property string lastError: ""
-  property string busyContainerId: ""
 
   readonly property bool readOnly: setting("readOnly", false) === true
   readonly property bool showStats: setting("showStats", true) === true
@@ -145,6 +144,26 @@ Item {
 
   // ---- Actions -------------------------------------------------------------
 
+  // Which containers have an action in flight, as id -> verb. A map rather than
+  // a single id because actions run in parallel: one shared process meant that
+  // a `docker stop`, which waits ten seconds for SIGTERM before resorting to
+  // SIGKILL, silently swallowed every click on every other container for the
+  // whole of that wait.
+  property var busyActions: ({})
+
+  function busyAction(id) {
+    var verb = busyActions[String(id)]
+    return verb === undefined ? "" : verb
+  }
+
+  function setBusy(id, verb) {
+    var next = ({})
+    for (var key in busyActions) next[key] = busyActions[key]
+    if (verb === "") delete next[String(id)]
+    else next[String(id)] = verb
+    busyActions = next
+  }
+
   // The single mutation entry point. Every button in the UI routes here.
   function runAction(action, container) {
     if (!container || !daemonReachable) return
@@ -152,19 +171,59 @@ Item {
       lastError = "Read-only mode is on"
       return
     }
-    if (actionProcess.running) return
+    // Serialised per container, parallel across them: two verbs racing on one
+    // container is incoherent, but stopping one while starting another is not.
+    if (busyAction(container.id) !== "") return
 
     var command = commandFor(action, container)
     if (!command) return
 
-    busyContainerId = container.id
     lastError = ""
     // Stopping something on purpose must not notify the person who asked.
     if (action === "stop" || action === "restart" || action === "remove" || action === "removeVolumes") {
       markSelfInitiated(container.id)
     }
-    actionProcess.command = command
-    actionProcess.running = true
+
+    var proc = actionComponent.createObject(root, {
+      containerId: container.id,
+      verb: action,
+      command: command
+    })
+    if (!proc) {
+      lastError = "Could not run " + action
+      return
+    }
+    setBusy(container.id, action)
+    proc.running = true
+  }
+
+  function finishAction(id, verb, failure) {
+    setBusy(id, "")
+    if (failure && failure !== "") lastError = failure
+    // The event stream reports the real state change; this only settles the UI
+    // when an action turned out to be a no-op and produced no event.
+    refresh()
+  }
+
+  // One process per in-flight action, destroyed when it exits.
+  Component {
+    id: actionComponent
+
+    Process {
+      id: proc
+      property string containerId: ""
+      property string verb: ""
+      property string failure: ""
+
+      stderr: StdioCollector {
+        onStreamFinished: proc.failure = Model.firstRealError(text)
+      }
+
+      onExited: function (exitCode) {
+        root.finishAction(proc.containerId, proc.verb, exitCode === 0 ? "" : proc.failure)
+        proc.destroy()
+      }
+    }
   }
 
   // Maps a verb to argv. The container id is always passed as its own argv
@@ -310,23 +369,6 @@ Item {
       onStreamFinished: {
         // Containers removed between listing the ids and inspecting them are
         // expected; anything else is worth showing.
-        var message = Model.firstRealError(text)
-        if (message !== "") root.lastError = message
-      }
-    }
-  }
-
-  Process {
-    id: actionProcess
-    running: false
-    onExited: function (exitCode) {
-      root.busyContainerId = ""
-      // The event stream will report the real state change; this is only a
-      // nudge so a no-op action still settles the UI.
-      root.refresh()
-    }
-    stderr: StdioCollector {
-      onStreamFinished: {
         var message = Model.firstRealError(text)
         if (message !== "") root.lastError = message
       }

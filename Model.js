@@ -439,6 +439,23 @@ function cursorIndexForId(list, id, fallbackIndex) {
   return Math.max(0, Math.min(items.length - 1, fallbackIndex))
 }
 
+// Present tense, because it is shown while the action is still running. A row
+// mid-action must say what is happening to it: `docker stop` can take ten
+// seconds to escalate from SIGTERM to SIGKILL, and a row that only greys out
+// for that long is indistinguishable from one that is broken.
+function busyLabel(action) {
+  switch (action) {
+    case "start": return "Starting…"
+    case "stop": return "Stopping…"
+    case "restart": return "Restarting…"
+    case "pause": return "Pausing…"
+    case "unpause": return "Resuming…"
+    case "remove":
+    case "removeVolumes": return "Removing…"
+    default: return "Working…"
+  }
+}
+
 // The action Enter runs on the cursor row. Start and stop are the same key
 // because they are the same intent — "flip this container" — and needing to
 // know which one applies before pressing a key defeats the point.

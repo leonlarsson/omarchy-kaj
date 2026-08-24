@@ -23,7 +23,9 @@ Item {
   property string fontFamily: Style.font.family
   property bool showStats: true
   property bool readOnly: false
-  property bool busy: false
+  // The verb currently running against this container, or "" when idle.
+  property string busyVerb: ""
+  readonly property bool busy: busyVerb !== ""
   // Keyboard cursor. Distinct from hover so a mouse passing over the panel
   // never looks like a selection the keyboard would act on.
   property bool hasCursor: false
@@ -91,12 +93,13 @@ Item {
       border.width: row.running ? 0 : 1
       border.color: row.severityColor
 
-      // Transient states are the ones worth animating: restarting, and waiting
-      // on a healthcheck. A still dot would read as settled when it is not.
+      // Transient states are the ones worth animating: an action in flight,
+      // restarting, and waiting on a healthcheck. A still dot would read as
+      // settled when it is not.
       SequentialAnimation on opacity {
-        running: row.container
+        running: row.busy || (row.container
           ? (row.container.restarting === true || row.container.health === "starting")
-          : false
+          : false)
         loops: Animation.Infinite
         NumberAnimation { to: 0.25; duration: 620; easing.type: Easing.InOutQuad }
         NumberAnimation { to: 1.0; duration: 620; easing.type: Easing.InOutQuad }
@@ -120,8 +123,12 @@ Item {
 
       Text {
         width: parent.width
-        text: row.container ? Model.statusSummary(row.container, row.now || Date.now()) : ""
-        color: row.severity === "error" ? Color.urgent : row.dim
+        text: row.busy
+          ? Model.busyLabel(row.busyVerb)
+          : (row.container ? Model.statusSummary(row.container, row.now || Date.now()) : "")
+        color: row.busy
+          ? Color.accent
+          : (row.severity === "error" ? Color.urgent : row.dim)
         font.family: row.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
