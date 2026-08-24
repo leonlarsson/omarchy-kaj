@@ -162,8 +162,9 @@ Panel {
 
   function removeCursor() {
     var container = cursorContainer
-    if (!container) return
-    if (Model.availableActions(container).indexOf("remove") === -1) return
+    if (!container) { flash("Select a container first"); return }
+    var reason = Model.unavailableReason("remove", container)
+    if (reason !== "") { flash(reason); return }
     requestAction("remove", container)
   }
 
@@ -173,8 +174,11 @@ Panel {
     if (Model.isSearchKey(text)) { openSearch(); return }
     var container = cursorContainer
     if (!container) return
-    var action = Model.actionForKey(text, container)
-    if (action !== "") requestAction(action, container)
+    var action = Model.intendedAction(text, container)
+    if (action === "") return
+    var reason = Model.unavailableReason(action, container)
+    if (reason !== "") { flash(reason); return }
+    requestAction(action, container)
   }
 
   // Pending destructive action, held while the confirm dialog is up. Kaj never
@@ -185,6 +189,23 @@ Panel {
   function clearPending() {
     pendingAction = ""
     pendingContainer = null
+  }
+
+  // A keystroke that cannot act has to say so. Silence leaves the user unable
+  // to tell an unavailable action from a broken keybind, which is how "x does
+  // nothing" becomes a bug report instead of a shrug.
+  property string notice: ""
+
+  function flash(message) {
+    notice = message
+    noticeTimer.restart()
+  }
+
+  Timer {
+    id: noticeTimer
+    interval: 2600
+    repeat: false
+    onTriggered: root.notice = ""
   }
 
   // Uptime is derived from a fixed startedAt, so nothing in the container data
@@ -348,7 +369,13 @@ Panel {
 
               Text {
                 width: parent.width
+                // The subtitle doubles as the transient notice line. A message
+                // appended below the list is never seen: it sits under a
+                // scrolling column, off screen, and is gone before anyone
+                // scrolls to it. Here it is always visible and costs no layout
+                // shift, because the line already exists.
                 text: {
+                  if (root.notice !== "") return root.notice
                   if (!root.kaj) return ""
                   if (!root.reachable) return root.kaj.summary
                   // While filtering, the honest summary is what is on screen
@@ -356,7 +383,7 @@ Panel {
                   if (root.filtering) return root.flatContainers.length + " of " + root.kaj.totalCount + " shown"
                   return root.kaj.summary
                 }
-                color: root.dim
+                color: root.notice !== "" ? Color.accent : root.dim
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideRight

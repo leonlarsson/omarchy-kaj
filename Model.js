@@ -456,6 +456,21 @@ function busyLabel(action) {
   }
 }
 
+// Why a key did nothing, phrased as the thing to do about it. Returning "" means
+// the action is available and the caller should just run it. Silence is the
+// wrong answer for a keystroke: the user cannot tell a no-op from a broken bind.
+function unavailableReason(action, container) {
+  if (!container) return "Select a container first"
+  if (availableActions(container).indexOf(action) !== -1) return ""
+  if (action === "remove") {
+    if (container.running) return "Stop " + container.name + " before removing it"
+    return "Cannot remove " + container.name
+  }
+  if (action === "shell" && !container.running) return container.name + " is not running"
+  if (action === "restart" && !container.running) return "Start " + container.name + " instead"
+  return "Not available for " + container.name
+}
+
 // The action Enter runs on the cursor row. Start and stop are the same key
 // because they are the same intent — "flip this container" — and needing to
 // know which one applies before pressing a key defeats the point.
@@ -480,17 +495,24 @@ function isSearchKey(text) {
   return String(text === undefined || text === null ? "" : text).charCodeAt(0) === 6
 }
 
-// Single-letter shortcuts, checked against what the container supports so a
-// key never fires an action the buttons would not have offered. h/j/k/l and x
-// are consumed by PanelKeyCatcher before Kaj sees them, so they are absent
-// here by necessity, not by choice.
+// What a key means, regardless of whether it can run right now. Kept separate
+// from availability so the caller can tell "that key does nothing" apart from
+// "that key means something you cannot do yet" — the first deserves silence,
+// the second deserves an explanation. h/j/k/l and x are consumed by
+// PanelKeyCatcher before Kaj sees them, so they are absent here by necessity.
+function intendedAction(key, container) {
+  if (key === "r") return "restart"
+  if (key === "o") return "logs"
+  if (key === "s") return "shell"
+  if (key === "p") return container && container.paused ? "unpause" : "pause"
+  return ""
+}
+
+// The action a key should actually run, or "" if the container does not
+// support it. Kept so a caller that only wants the runnable verb has one.
 function actionForKey(key, container) {
   if (!container) return ""
-  var action = ""
-  if (key === "r") action = "restart"
-  else if (key === "o") action = "logs"
-  else if (key === "s") action = "shell"
-  else if (key === "p") action = container.paused ? "unpause" : "pause"
+  var action = intendedAction(key, container)
   if (action === "") return ""
   return availableActions(container).indexOf(action) === -1 ? "" : action
 }

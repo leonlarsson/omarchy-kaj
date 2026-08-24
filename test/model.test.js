@@ -481,6 +481,32 @@ test("firstRealError caps length and handles empty input", () => {
   assert.ok(model.firstRealError("x".repeat(500)).length <= 201);
 });
 
+// --- Action feedback --------------------------------------------------------
+
+test("intendedAction is separate from whether the action can run", () => {
+  const stopped = container({ running: false });
+  // The key means "shell" even though a stopped container has none. Conflating
+  // the two is what made an unavailable action indistinguishable from a dead
+  // keybind.
+  assert.equal(model.intendedAction("s", stopped), "shell");
+  assert.equal(model.actionForKey("s", stopped), "");
+  assert.equal(model.intendedAction("z", stopped), "");
+  // p flips with the container's state.
+  assert.equal(model.intendedAction("p", container({ running: true })), "pause");
+  assert.equal(model.intendedAction("p", container({ running: true, paused: true })), "unpause");
+});
+
+test("unavailableReason says what to do, not just that it failed", () => {
+  const running = container({ running: true, name: "api" });
+  assert.equal(model.unavailableReason("remove", running), "Stop api before removing it");
+  assert.equal(model.unavailableReason("shell", container({ running: false, name: "api" })), "api is not running");
+  assert.equal(model.unavailableReason("restart", container({ running: false, name: "api" })), "Start api instead");
+  assert.equal(model.unavailableReason("remove", null), "Select a container first");
+  // Available actions produce no reason at all.
+  assert.equal(model.unavailableReason("stop", running), "");
+  assert.equal(model.unavailableReason("remove", container({ running: false })), "");
+});
+
 test("busyLabel describes the action in progress", () => {
   assert.equal(model.busyLabel("stop"), "Stopping…");
   assert.equal(model.busyLabel("restart"), "Restarting…");
