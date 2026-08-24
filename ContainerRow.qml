@@ -24,6 +24,9 @@ Item {
   property bool showStats: true
   property bool readOnly: false
   property bool busy: false
+  // Keyboard cursor. Distinct from hover so a mouse passing over the panel
+  // never looks like a selection the keyboard would act on.
+  property bool hasCursor: false
 
   signal actionRequested(string action)
 
@@ -43,8 +46,22 @@ Item {
   Rectangle {
     anchors.fill: parent
     radius: Style.cornerRadius
-    color: hover.containsMouse ? Util.alpha(row.foreground, 0.06) : "transparent"
+    color: row.hasCursor
+      ? Style.selectedFillFor(row.foreground, Color.accent)
+      : (hover.containsMouse ? Util.alpha(row.foreground, 0.06) : "transparent")
     Behavior on color { ColorAnimation { duration: 90 } }
+
+    // An accent bar on the selected row, so the cursor is legible even where
+    // the fill tint is subtle against the theme background.
+    Rectangle {
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(2)
+      height: parent.height * 0.62
+      radius: width
+      visible: row.hasCursor
+      color: Color.accent
+    }
   }
 
   MouseArea {

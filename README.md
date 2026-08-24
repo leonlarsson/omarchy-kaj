@@ -19,6 +19,21 @@ Optionally bind the panel to a key:
 o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 ```
 
+## Keys
+
+| Key | Action |
+|---|---|
+| `j` / `k` | Move between containers |
+| `h` / `l` | Switch status filter |
+| `Enter` | Start or stop the selected container |
+| `r` | Restart |
+| `o` | Logs |
+| `s` | Shell |
+| `p` | Pause or resume |
+| `x` | Remove (asks first) |
+| `Ctrl+F` or `/` | Search by name, service, project, or image |
+| `Esc` | Clear the search, then close the panel |
+
 ## Settings
 
 Set per widget in the Omarchy settings panel, or in `~/.config/omarchy/shell.json`.
@@ -27,7 +42,7 @@ Set per widget in the Omarchy settings panel, or in `~/.config/omarchy/shell.jso
 |---|---|---|
 | `readOnly` | `false` | Disable every action that changes a container. Status, stats, and logs still work. |
 | `showStats` | `true` | Stream live CPU and memory. |
-| `hideStopped` | `false` | Hide cleanly stopped containers. Crashed and OOM-killed ones stay visible. |
+| `defaultFilter` | `all` | Status filter selected when the panel opens: `all`, `running`, `stopped`, or `problems`. |
 | `notifyOnExit` | `true` | Notify when a container exits non-zero or is OOM-killed. |
 | `refreshIntervalSec` | `30` | Reconcile interval. Kaj follows `docker events`, so this only bounds how long a missed event goes unnoticed. |
 | `logLines` | `500` | History shown before `logs` starts following. |

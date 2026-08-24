@@ -230,21 +230,6 @@ test("groupByProject sorts projects alphabetically and puts standalone last", ()
   assert.equal(groups[0].total, 1);
 });
 
-test("hideStopped hides the boring ones but never the evidence", () => {
-  const list = [
-    container({ name: "up", running: true }),
-    container({ name: "clean", running: false, exitCode: 0 }),
-    container({ name: "crashed", running: false, exitCode: 1 }),
-    container({ name: "oom", running: false, oomKilled: true })
-  ];
-  assert.equal(model.visibleContainers(list, false).length, 4);
-  // A cleanly stopped container is hidden; a crash and an OOM kill are not.
-  assert.deepEqual(
-    plain(model.visibleContainers(list, true).map(c => c.name)),
-    ["up", "crashed", "oom"]
-  );
-});
-
 test("containers sort running first, then by service name", () => {
   const group = model.groupByProject([
     container({ project: "p", service: "b", running: true }),
@@ -337,4 +322,120 @@ test("confirm text names the container and what is lost", () => {
   assert.ok(model.confirmText("remove", c).includes("volumes are kept"));
   assert.ok(model.confirmText("removeVolumes", c).includes("lost"));
   assert.equal(model.confirmVerb("remove"), "Remove");
+});
+
+// --- Search and status filtering --------------------------------------------
+
+test("matchesQuery searches name, service, project, image, and short id", () => {
+  const c = container({
+    name: "web-1", service: "web", project: "shop",
+    image: "nginx:alpine", shortId: "abc123def456"
+  });
+  assert.ok(model.matchesQuery(c, "web"));
+  assert.ok(model.matchesQuery(c, "shop"));
+  assert.ok(model.matchesQuery(c, "nginx"));
+  assert.ok(model.matchesQuery(c, "abc123"));
+  assert.ok(model.matchesQuery(c, "WEB"), "case-insensitive");
+  assert.ok(model.matchesQuery(c, "  web  "), "trims");
+  assert.ok(model.matchesQuery(c, ""), "empty query matches everything");
+  assert.ok(!model.matchesQuery(c, "postgres"));
+});
+
+test("matchesQuery is substring, not fuzzy", () => {
+  const c = container({ name: "database", service: "", project: "", image: "", shortId: "" });
+  assert.ok(model.matchesQuery(c, "abas"));
+  // A fuzzy matcher would accept this; substring must not.
+  assert.ok(!model.matchesQuery(c, "dbs"));
+});
+
+test("status filters partition the list", () => {
+  const running = container({ running: true });
+  const stopped = container({ running: false, exitCode: 0 });
+  const crashed = container({ running: false, exitCode: 1 });
+
+  assert.ok(model.matchesStatus(running, "running"));
+  assert.ok(!model.matchesStatus(running, "stopped"));
+  assert.ok(model.matchesStatus(stopped, "stopped"));
+  assert.ok(model.matchesStatus(crashed, "problems"));
+  assert.ok(!model.matchesStatus(running, "problems"));
+  // A crashed container is both stopped and a problem.
+  assert.ok(model.matchesStatus(crashed, "stopped"));
+  assert.ok(model.matchesStatus(running, "all"));
+});
+
+test("filterContainers applies status and query together", () => {
+  const list = [
+    container({ name: "web", running: true }),
+    container({ name: "web-old", running: false, exitCode: 0 }),
+    container({ name: "db", running: true })
+  ];
+  assert.equal(model.filterContainers(list, "", "all").length, 3);
+  assert.equal(model.filterContainers(list, "web", "all").length, 2);
+  assert.equal(model.filterContainers(list, "web", "running").length, 1);
+  assert.equal(model.filterContainers(list, "nothing", "all").length, 0);
+});
+
+test("chip counts reflect what clicking the chip will show", () => {
+  const list = [
+    container({ name: "web", running: true }),
+    container({ name: "web-old", running: false, exitCode: 1 }),
+    container({ name: "db", running: true })
+  ];
+  const all = model.statusCounts(list, "");
+  assert.deepEqual(plain(all), { all: 3, running: 2, stopped: 1, problems: 1 });
+
+  // Counts must narrow with the query, or a chip would advertise a number its
+  // own click cannot produce.
+  const searched = model.statusCounts(list, "web");
+  assert.deepEqual(plain(searched), { all: 2, running: 1, stopped: 1, problems: 1 });
+});
+
+// --- Keyboard cursor --------------------------------------------------------
+
+test("flattenGroups walks groups as one sequence", () => {
+  const groups = model.groupByProject([
+    container({ name: "a", project: "one", service: "a" }),
+    container({ name: "b", project: "two", service: "b" }),
+    container({ name: "c", project: "one", service: "c" })
+  ]);
+  assert.deepEqual(plain(model.flattenGroups(groups).map(c => c.name)), ["a", "c", "b"]);
+});
+
+test("moveCursor clamps instead of wrapping", () => {
+  assert.equal(model.moveCursor(-1, 1, 3), 0, "first j selects the top row");
+  assert.equal(model.moveCursor(-1, -1, 3), 2, "first k selects the bottom row");
+  assert.equal(model.moveCursor(0, 1, 3), 1);
+  assert.equal(model.moveCursor(2, 1, 3), 2, "stops at the end");
+  assert.equal(model.moveCursor(0, -1, 3), 0, "stops at the start");
+  assert.equal(model.moveCursor(0, 1, 0), -1, "empty list has no cursor");
+});
+
+test("cursor follows its container across a refresh", () => {
+  const before = [container({ id: "a" }), container({ id: "b" }), container({ id: "c" })];
+  // Same containers, reordered by a refresh: the cursor tracks the id, not the row.
+  const after = [container({ id: "c" }), container({ id: "a" }), container({ id: "b" })];
+  assert.equal(model.cursorIndexForId(after, "b", 1), 2);
+  // The tracked container disappeared: fall back to the old position, clamped.
+  assert.equal(model.cursorIndexForId([container({ id: "z" })], "b", 2), 0);
+  assert.equal(model.cursorIndexForId([], "b", 1), -1);
+});
+
+test("Enter runs one intent regardless of container state", () => {
+  assert.equal(model.primaryAction(container({ running: true })), "stop");
+  assert.equal(model.primaryAction(container({ running: false })), "start");
+  assert.equal(model.primaryAction(container({ running: true, paused: true })), "unpause");
+});
+
+test("letter shortcuts never fire an action the buttons would not offer", () => {
+  const running = container({ running: true });
+  const stopped = container({ running: false });
+  assert.equal(model.actionForKey("r", running), "restart");
+  assert.equal(model.actionForKey("o", running), "logs");
+  assert.equal(model.actionForKey("s", running), "shell");
+  assert.equal(model.actionForKey("p", running), "pause");
+  // A stopped container has no shell to open and cannot be restarted.
+  assert.equal(model.actionForKey("s", stopped), "");
+  assert.equal(model.actionForKey("r", stopped), "");
+  assert.equal(model.actionForKey("o", stopped), "logs");
+  assert.equal(model.actionForKey("z", running), "");
 });

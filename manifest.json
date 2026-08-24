@@ -25,7 +25,7 @@
     "defaults": {
       "readOnly": false,
       "showStats": true,
-      "hideStopped": false,
+      "defaultFilter": "all",
       "notifyOnExit": true,
       "refreshIntervalSec": 30,
       "logLines": 500
@@ -46,10 +46,12 @@
         "description": "Stream per-container resource usage. Turn off to leave one fewer long-running docker process attached to the daemon."
       },
       {
-        "key": "hideStopped",
-        "type": "boolean",
-        "label": "Hide stopped containers",
-        "defaultValue": false
+        "key": "defaultFilter",
+        "type": "enum",
+        "label": "Filter when the panel opens",
+        "options": ["all", "running", "stopped", "problems"],
+        "defaultValue": "all",
+        "description": "Which status filter is selected each time the panel opens. Problems covers unhealthy, crashed, OOM-killed, and restart-looping containers."
       },
       {
         "key": "notifyOnExit",

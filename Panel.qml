@@ -7,6 +7,14 @@ import "Model.js" as Model
 
 // Kaj's panel: containers grouped by Compose project, because that is how
 // people think about them — "my app", not eleven unrelated names.
+//
+// Keyboard model. PanelKeyCatcher already claims h/j/k/l, x, Esc, Tab, Enter
+// and Space before Kaj sees a key, and forwards everything else as textKey.
+// Search is therefore entered deliberately with Ctrl+F or "/" rather than by
+// typing into the list: type-to-filter would swallow the whole alphabet and
+// permanently foreclose single-letter action keys. While the search field has
+// focus the catcher is `blocked`, which is the mechanism the base component
+// documents for exactly this case, so the two modes never fight over a key.
 Panel {
   id: root
   moduleName: "mozzy.kaj"
@@ -24,7 +32,6 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Util.alpha(contentForeground, 0.62)
 
-  readonly property var groups: kaj ? kaj.groups : []
   readonly property bool readOnly: kaj ? kaj.readOnly === true : false
   readonly property bool showStats: kaj ? kaj.showStats === true : true
   readonly property bool installed: kaj ? kaj.dockerInstalled === true : false
@@ -32,32 +39,99 @@ Panel {
   readonly property bool probing: kaj ? kaj.probing === true : true
   readonly property bool hasContainers: kaj ? kaj.totalCount > 0 : false
 
-  // Pending destructive action, held while the confirm dialog is up. Kaj never
-  // performs one of these directly from a click.
-  property string pendingAction: ""
-  property var pendingContainer: null
+  // ---- Filter and search state ---------------------------------------------
 
-  // Uptime is derived from a fixed startedAt, so nothing in the container data
-  // changes as it ages. Without a clock of its own the label would sit at
-  // whatever it read when the list was last rebuilt — which is why it could
-  // show "Up 5s" long after the fact while live stats kept moving. Ticking only
-  // while the panel is open keeps a closed panel completely idle.
-  property double nowMs: Date.now()
+  property string query: ""
+  property bool searchActive: false
+  property string statusFilter: "all"
 
-  Timer {
-    running: root.opened
-    interval: 1000
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: root.nowMs = Date.now()
+  readonly property var allContainers: kaj ? kaj.containers : []
+  readonly property var counts: Model.statusCounts(allContainers, query)
+  readonly property var groups: Model.groupByProject(
+    Model.filterContainers(allContainers, query, statusFilter))
+  // The flat sequence the keyboard walks. Groups are a visual convenience, so
+  // j from the last row of one project lands on the first row of the next.
+  readonly property var flatContainers: Model.flattenGroups(groups)
+  readonly property bool filtering: query !== "" || statusFilter !== "all"
+
+  // ---- Keyboard cursor -----------------------------------------------------
+
+  property int cursorIndex: -1
+  // The cursor stays invisible until a key is actually pressed, so a
+  // mouse-driven panel never shows a stray highlight the user did not ask for.
+  property bool cursorActive: false
+  // Tracked by id, not position: an event can rebuild the list while you are
+  // three rows down, and the selection must stay on the container you chose.
+  property string cursorId: ""
+
+  readonly property var cursorContainer: cursorActive && cursorIndex >= 0
+    && cursorIndex < flatContainers.length ? flatContainers[cursorIndex] : null
+
+  onFlatContainersChanged: {
+    if (!cursorActive) return
+    cursorIndex = Model.cursorIndexForId(flatContainers, cursorId, cursorIndex)
+    cursorId = cursorContainer ? cursorContainer.id : ""
+    if (cursorIndex < 0) cursorActive = false
   }
 
-  function scrollPanel(delta) {
-    panelFlick.contentY = Math.max(
-      0,
-      Math.min(panelFlick.contentY + delta, Math.max(0, panelFlick.contentHeight - panelFlick.height))
-    )
+  function moveCursorBy(delta) {
+    if (flatContainers.length === 0) return
+    cursorActive = true
+    cursorIndex = Model.moveCursor(cursorIndex, delta, flatContainers.length)
+    cursorId = cursorContainer ? cursorContainer.id : ""
   }
+
+  // h and l are handed to us by the key catcher and would otherwise go unused;
+  // stepping the status filter with them keeps every navigation key meaningful.
+  function stepFilter(delta) {
+    var index = Model.statusFilters.indexOf(statusFilter)
+    if (index < 0) index = 0
+    var next = index + delta
+    if (next < 0) next = Model.statusFilters.length - 1
+    if (next >= Model.statusFilters.length) next = 0
+    setStatusFilter(Model.statusFilters[next])
+  }
+
+  function setStatusFilter(next) {
+    statusFilter = next
+    resetCursor()
+  }
+
+  function resetCursor() {
+    cursorIndex = -1
+    cursorId = ""
+    cursorActive = false
+  }
+
+  // ---- Search --------------------------------------------------------------
+
+  function openSearch() {
+    searchActive = true
+    Qt.callLater(function () { searchField.forceActiveFocus() })
+  }
+
+  // Esc in the field clears and leaves; the query is not worth preserving
+  // through an explicit cancel.
+  function cancelSearch() {
+    query = ""
+    searchField.text = ""
+    searchActive = false
+    resetCursor()
+    keyCatcher.forceActiveFocus()
+  }
+
+  // Enter keeps the query but hands focus back, so j/k drive the list that the
+  // search just narrowed — the fzf shape people already expect.
+  function commitSearch() {
+    keyCatcher.forceActiveFocus()
+    if (flatContainers.length > 0) {
+      cursorActive = true
+      cursorIndex = 0
+      cursorId = flatContainers[0].id
+    }
+  }
+
+  // ---- Actions -------------------------------------------------------------
 
   // The one place a container action enters the panel. Destructive verbs are
   // parked here until the user confirms; everything else runs immediately,
@@ -80,11 +154,98 @@ Panel {
     kaj.runAction(action, container)
   }
 
+  function activateCursor() {
+    var container = cursorContainer
+    if (!container) return
+    requestAction(Model.primaryAction(container), container)
+  }
+
+  function removeCursor() {
+    var container = cursorContainer
+    if (!container) return
+    if (Model.availableActions(container).indexOf("remove") === -1) return
+    requestAction("remove", container)
+  }
+
+  function handleTextKey(text) {
+    if (text === "/") { openSearch(); return }
+    var container = cursorContainer
+    if (!container) return
+    var action = Model.actionForKey(text, container)
+    if (action !== "") requestAction(action, container)
+  }
+
+  // Pending destructive action, held while the confirm dialog is up. Kaj never
+  // performs one of these directly from a click.
+  property string pendingAction: ""
+  property var pendingContainer: null
+
   function clearPending() {
     pendingAction = ""
     pendingContainer = null
   }
 
+  // Uptime is derived from a fixed startedAt, so nothing in the container data
+  // changes as it ages. Without a clock of its own the label would sit at
+  // whatever it read when the list was last rebuilt — which is why it could
+  // show "Up 5s" long after the fact while live stats kept moving. Ticking only
+  // while the panel is open keeps a closed panel completely idle.
+  property double nowMs: Date.now()
+
+  Timer {
+    running: root.opened
+    interval: 1000
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.nowMs = Date.now()
+  }
+
+  // Every open starts from the configured filter with no stale query or cursor
+  // left over from last time.
+  onOpenedChanged: {
+    if (opened) {
+      statusFilter = kaj ? kaj.defaultFilter : "all"
+      query = ""
+      searchField.text = ""
+      searchActive = false
+      resetCursor()
+    } else {
+      searchActive = false
+    }
+  }
+
+  // Ctrl+F as a real shortcut rather than sniffing for the raw control byte the
+  // key catcher would otherwise deliver through textKey. Gated on `opened` so
+  // it cannot fire while the panel is closed.
+  Shortcut {
+    // `sequences` rather than `sequence`: StandardKey.Find carries more than
+    // one binding, and binding only the first is what Qt warns about.
+    sequences: [StandardKey.Find]
+    enabled: root.opened
+    onActivated: root.openSearch()
+  }
+
+  function scrollPanel(delta) {
+    panelFlick.contentY = Math.max(
+      0,
+      Math.min(panelFlick.contentY + delta, Math.max(0, panelFlick.contentHeight - panelFlick.height))
+    )
+  }
+
+  // Keeps the cursor row on screen as j/k walk past the fold.
+  function ensureVisible(item) {
+    if (!item) return
+    var top = item.mapToItem(content, 0, 0).y
+    var bottom = top + item.height
+    var pad = Style.space(8)
+    if (top - pad < panelFlick.contentY) {
+      panelFlick.contentY = Math.max(0, top - pad)
+    } else if (bottom + pad > panelFlick.contentY + panelFlick.height) {
+      panelFlick.contentY = Math.min(
+        Math.max(0, panelFlick.contentHeight - panelFlick.height),
+        bottom + pad - panelFlick.height)
+    }
+  }
 
   KeyboardPanel {
     id: panel
@@ -99,11 +260,18 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      // While the field has focus every key belongs to it, including j and x.
+      blocked: root.searchActive && searchField.activeFocus
+
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
-        if (dy !== 0) root.scrollPanel(dy * Style.space(56))
+        if (dy !== 0) root.moveCursorBy(dy)
+        else if (dx !== 0) root.stepFilter(dx)
       }
+      onActivateRequested: root.activateCursor()
+      onDeleteRequested: root.removeCursor()
+      onTextKey: function (text) { root.handleTextKey(text) }
 
       Flickable {
         id: panelFlick
@@ -127,7 +295,7 @@ Panel {
         Column {
           id: content
           width: panelFlick.width
-          spacing: Style.space(12)
+          spacing: Style.space(10)
 
           // ---- Header ------------------------------------------------------
 
@@ -145,7 +313,7 @@ Panel {
 
             Column {
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(36) - refreshButton.width - Style.space(30)
+              width: parent.width - Style.space(36) - searchButton.width - refreshButton.width - Style.space(42)
               spacing: Style.space(2)
 
               Row {
@@ -185,13 +353,33 @@ Panel {
 
               Text {
                 width: parent.width
-                text: root.kaj ? root.kaj.summary : ""
+                text: {
+                  if (!root.kaj) return ""
+                  if (!root.reachable) return root.kaj.summary
+                  // While filtering, the honest summary is what is on screen
+                  // versus what exists — not the unfiltered total.
+                  if (root.filtering) return root.flatContainers.length + " of " + root.kaj.totalCount + " shown"
+                  return root.kaj.summary
+                }
                 color: root.dim
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
               }
+            }
+
+            PanelActionButton {
+              id: searchButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰍉"
+              tooltipText: "Search  (Ctrl+F)"
+              foreground: root.searchActive ? Color.accent : root.contentForeground
+              hoverColor: Color.accent
+              fontFamily: root.contentFontFamily
+              enabled: root.reachable
+              opacity: enabled ? 1.0 : 0.35
+              onClicked: root.searchActive ? root.cancelSearch() : root.openSearch()
             }
 
             PanelActionButton {
@@ -205,6 +393,74 @@ Panel {
               enabled: root.reachable
               opacity: enabled ? 1.0 : 0.35
               onClicked: if (root.kaj) root.kaj.refresh()
+            }
+          }
+
+          // ---- Search field ------------------------------------------------
+
+          TextField {
+            id: searchField
+            width: parent.width
+            visible: root.searchActive
+            height: visible ? implicitHeight : 0
+            placeholderText: "Filter by name, service, project, or image"
+            foreground: root.contentForeground
+            accent: Color.accent
+            font.family: root.contentFontFamily
+
+            onTextChanged: {
+              root.query = text
+              root.resetCursor()
+            }
+
+            Keys.onEscapePressed: function (event) {
+              root.cancelSearch()
+              event.accepted = true
+            }
+            Keys.onReturnPressed: function (event) {
+              root.commitSearch()
+              event.accepted = true
+            }
+            Keys.onEnterPressed: function (event) {
+              root.commitSearch()
+              event.accepted = true
+            }
+            // Down from the field moves straight into the list without
+            // needing Enter first.
+            Keys.onDownPressed: function (event) {
+              root.commitSearch()
+              event.accepted = true
+            }
+          }
+
+          // ---- Status filter chips -----------------------------------------
+
+          Row {
+            width: parent.width
+            spacing: Style.space(5)
+            visible: root.reachable && root.hasContainers
+
+            Repeater {
+              model: Model.statusFilters
+
+              Button {
+                required property string modelData
+                readonly property int count: root.counts ? (root.counts[modelData] || 0) : 0
+
+                // The count makes each chip informative rather than just a
+                // control: the numbers always add up to what clicking produces.
+                text: Model.statusFilterLabel(modelData) + "  " + count
+                selected: root.statusFilter === modelData
+                foreground: modelData === "problems" && count > 0
+                  ? Color.urgent : root.contentForeground
+                accent: modelData === "problems" && count > 0 ? Color.urgent : Color.accent
+                fontFamily: root.contentFontFamily
+                fontSize: Style.font.caption
+                // An empty bucket stays clickable so its empty state can
+                // explain itself, but reads as unremarkable.
+                opacity: count > 0 || root.statusFilter === modelData ? 1.0 : 0.45
+                onClicked: root.setStatusFilter(modelData)
+              }
             }
           }
 
@@ -250,15 +506,24 @@ Panel {
             // popup — a click there is too cheap for what it does.
           }
 
-          // ---- Empty state -------------------------------------------------
+          // ---- Empty states ------------------------------------------------
 
           Text {
             width: parent.width
-            visible: root.reachable && !root.hasContainers && !root.probing
-            text: "No containers yet."
+            visible: root.reachable && !root.probing
+              && root.flatContainers.length === 0
+            text: {
+              if (!root.hasContainers) return "No containers yet."
+              if (root.query !== "") return "Nothing matches “" + root.query + "”."
+              if (root.statusFilter === "problems") return "Nothing is broken."
+              if (root.statusFilter === "running") return "Nothing is running."
+              if (root.statusFilter === "stopped") return "Nothing is stopped."
+              return "No containers to show."
+            }
             color: root.dim
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.body
+            wrapMode: Text.WordWrap
             textFormat: Text.PlainText
           }
 
@@ -271,7 +536,7 @@ Panel {
               required property var modelData
 
               width: content.width
-              spacing: Style.space(5)
+              spacing: Style.space(4)
 
               PanelSectionHeader {
                 width: parent.width
@@ -288,6 +553,7 @@ Panel {
                 model: modelData.containers
 
                 ContainerRow {
+                  id: containerRow
                   required property var modelData
 
                   width: content.width
@@ -300,7 +566,10 @@ Panel {
                   showStats: root.showStats
                   readOnly: root.readOnly
                   busy: root.kaj ? root.kaj.busyContainerId === modelData.id : false
+                  hasCursor: root.cursorContainer
+                    && root.cursorContainer.id === modelData.id
 
+                  onHasCursorChanged: if (hasCursor) root.ensureVisible(containerRow)
                   onActionRequested: function (action) { root.requestAction(action, modelData) }
                 }
               }

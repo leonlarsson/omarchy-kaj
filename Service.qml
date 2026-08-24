@@ -35,7 +35,6 @@ Item {
 
   // ---- Container state -----------------------------------------------------
   property var containers: []
-  property var groups: []
   property var statsById: ({})
   property string severity: "ok"
   property int runningCount: 0
@@ -45,7 +44,7 @@ Item {
 
   readonly property bool readOnly: setting("readOnly", false) === true
   readonly property bool showStats: setting("showStats", true) === true
-  readonly property bool hideStopped: setting("hideStopped", false) === true
+  readonly property string defaultFilter: String(setting("defaultFilter", "all"))
   readonly property bool notifyOnExit: setting("notifyOnExit", true) === true
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 30, 5, 3600)
   readonly property int logLines: intSetting("logLines", 500, 50, 5000)
@@ -129,19 +128,17 @@ Item {
   // the safe alternative to hand-building JSON in a Go template.
   readonly property string inspectFormat: '{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"State":{{json .State}},"Labels":{{json .Config.Labels}},"Image":{{json .Config.Image}},"Ports":{{json .NetworkSettings.Ports}},"RestartCount":{{json .RestartCount}}}'
 
-  // Counts and severity are computed from the full list even when the panel is
-  // hiding stopped containers, so the bar never under-reports a problem just
-  // because the list is filtered.
+  // Counts and severity always come from the full list, never from whatever the
+  // panel is currently filtered to, so the bar cannot under-report a problem
+  // just because a filter is hiding it.
   function applyContainers(list) {
     containers = list
-    groups = Model.groupByProject(Model.visibleContainers(list, hideStopped))
     severity = Model.rollupSeverity(list)
     runningCount = Model.countRunning(list)
     totalCount = list.length
     probing = false
   }
 
-  onHideStoppedChanged: applyContainers(containers)
 
   // ---- Actions -------------------------------------------------------------
 
@@ -159,6 +156,10 @@ Item {
 
     busyContainerId = container.id
     lastError = ""
+    // Stopping something on purpose must not notify the person who asked.
+    if (action === "stop" || action === "restart" || action === "remove" || action === "removeVolumes") {
+      markSelfInitiated(container.id)
+    }
     actionProcess.command = command
     actionProcess.running = true
   }
@@ -400,20 +401,58 @@ Item {
       if (!event || event.Type !== "container") continue
       var status = String(event.status || event.Action || "")
       if (notifyOnExit && status === "die") announceExit(event)
+      if (notifyOnExit && status === "oom") announceOom(event)
       // Anything that changes container state warrants a re-read. Refresh is
       // cheap and coalesced by the running-guard in refresh().
       refreshTimer.restart()
     }
   }
 
-  // A container exiting non-zero, or being OOM-killed, is the one thing worth
-  // interrupting someone for. Everything else stays in the panel.
+  // Records a container Kaj itself just stopped or removed, so the die event
+  // that follows does not get announced back to the person who asked for it.
+  property var _selfInitiated: ({})
+
+  function markSelfInitiated(id) {
+    var next = ({})
+    for (var key in _selfInitiated) next[key] = _selfInitiated[key]
+    next[String(id)] = Date.now()
+    _selfInitiated = next
+  }
+
+  function wasSelfInitiated(id) {
+    var at = _selfInitiated[String(id)]
+    // Only recent enough to be the same act. A container stopped through Kaj an
+    // hour ago and crashing now deserves the notification.
+    return at !== undefined && (Date.now() - at) < 15000
+  }
+
+  // A container that failed is worth interrupting someone for. A container that
+  // did what it was told is not, and the difference is entirely in the exit
+  // code: 143 is SIGTERM, which is exactly what `docker stop` sends, and 130 is
+  // SIGINT. Treating those as failures would turn every ordinary stop into an
+  // alert, which is the fastest way to teach someone to ignore the alerts.
+  readonly property var quietExitCodes: [0, 130, 143]
+
   function announceExit(event) {
     var attributes = event.Actor && event.Actor.Attributes ? event.Actor.Attributes : {}
     var exitCode = parseInt(attributes.exitCode, 10)
-    if (!isFinite(exitCode) || exitCode === 0) return
+    if (!isFinite(exitCode)) return
+    if (quietExitCodes.indexOf(exitCode) !== -1) return
+    if (wasSelfInitiated(event.id)) return
+
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
-    notify("Container exited", name + " exited with code " + exitCode, "critical")
+    // Normal urgency, so it behaves like a notification rather than a modal:
+    // critical is sticky in most daemons and has to be dismissed by hand, which
+    // is far too much ceremony for a container exiting.
+    notify("Container exited", name + " exited with code " + exitCode, "normal")
+  }
+
+  // Out of memory is the one case that earns critical. It is rare, it is never
+  // something the user asked for, and it is the failure people most often miss.
+  function announceOom(event) {
+    var attributes = event.Actor && event.Actor.Attributes ? event.Actor.Attributes : {}
+    var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
+    notify("Container out of memory", name + " was killed for exceeding its memory limit", "critical")
   }
 
   // ---- Timers --------------------------------------------------------------

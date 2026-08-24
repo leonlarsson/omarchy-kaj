@@ -309,20 +309,131 @@ function mergeStats(existing, raw) {
 // Grouping and rollup
 // ---------------------------------------------------------------------------
 
-// The list the panel actually renders. Hiding stopped containers is a display
-// choice only: the bar count and severity keep using the full list, because a
-// container that crashed is exactly the one a person needs to be told about,
-// and hiding it must not also hide the fact that it failed.
-function visibleContainers(containers, hideStopped) {
+// ---------------------------------------------------------------------------
+// Search and status filtering
+// ---------------------------------------------------------------------------
+
+var statusFilters = ["all", "running", "stopped", "problems"]
+
+function statusFilterLabel(filter) {
+  if (filter === "running") return "Running"
+  if (filter === "stopped") return "Stopped"
+  if (filter === "problems") return "Problems"
+  return "All"
+}
+
+function matchesStatus(container, filter) {
+  if (!container) return false
+  if (filter === "running") return container.running === true
+  if (filter === "stopped") return container.running !== true
+  // "Problems" is the filter nothing else offers and the one most worth
+  // having: everything a person would want to act on right now, in one click.
+  if (filter === "problems") return containerSeverity(container) !== "ok"
+  return true
+}
+
+// Substring rather than fuzzy. Container names are short identifiers people
+// type exactly; a fuzzy match on "db" would drag in every container with a d
+// and a b in it and feel broken.
+function matchesQuery(container, query) {
+  if (!container) return false
+  var needle = String(query === undefined || query === null ? "" : query).trim().toLowerCase()
+  if (needle === "") return true
+  var haystacks = [container.name, container.service, container.project, container.image, container.shortId]
+  for (var i = 0; i < haystacks.length; i++) {
+    if (String(haystacks[i] || "").toLowerCase().indexOf(needle) !== -1) return true
+  }
+  return false
+}
+
+function filterContainers(containers, query, statusFilter) {
   var list = Array.isArray(containers) ? containers : []
-  if (!hideStopped) return list
   var out = []
   for (var i = 0; i < list.length; i++) {
-    // A stopped container that failed still shows: "hide stopped" means "hide
-    // the boring ones", not "hide the evidence".
-    if (list[i].running || containerSeverity(list[i]) === "error") out.push(list[i])
+    if (matchesStatus(list[i], statusFilter) && matchesQuery(list[i], query)) out.push(list[i])
   }
   return out
+}
+
+// Chip counts come from the same list the chips filter, so the numbers always
+// add up to what clicking them will show. Counted before the text query is
+// applied: a chip that reads "Running 8" while a search is narrowing the list
+// would be lying about what its own click produces, so the query is included.
+function statusCounts(containers, query) {
+  var list = Array.isArray(containers) ? containers : []
+  var counts = { all: 0, running: 0, stopped: 0, problems: 0 }
+  for (var i = 0; i < list.length; i++) {
+    if (!matchesQuery(list[i], query)) continue
+    counts.all++
+    if (matchesStatus(list[i], "running")) counts.running++
+    if (matchesStatus(list[i], "stopped")) counts.stopped++
+    if (matchesStatus(list[i], "problems")) counts.problems++
+  }
+  return counts
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard cursor
+// ---------------------------------------------------------------------------
+
+// The panel renders grouped, but the keyboard moves through one flat sequence:
+// j from the last container of one project lands on the first of the next.
+// Groups are a visual convenience, not a navigation boundary.
+function flattenGroups(groups) {
+  var out = []
+  var list = Array.isArray(groups) ? groups : []
+  for (var i = 0; i < list.length; i++) {
+    var containers = list[i] && Array.isArray(list[i].containers) ? list[i].containers : []
+    for (var j = 0; j < containers.length; j++) out.push(containers[j])
+  }
+  return out
+}
+
+// Clamps rather than wraps. Wrapping a short list makes j feel like it did
+// nothing; stopping at the end says "that is all of them".
+function moveCursor(index, delta, length) {
+  if (length <= 0) return -1
+  var next = index < 0 ? (delta > 0 ? 0 : length - 1) : index + delta
+  return Math.max(0, Math.min(length - 1, next))
+}
+
+// Keeps the cursor pointing at the same container across a refresh. Without
+// this, an event that rebuilds the list while you are three rows down snaps
+// the selection back to the top mid-keystroke.
+function cursorIndexForId(list, id, fallbackIndex) {
+  var items = Array.isArray(list) ? list : []
+  if (items.length === 0) return -1
+  if (id) {
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].id === id) return i
+    }
+  }
+  if (fallbackIndex === undefined || fallbackIndex < 0) return -1
+  return Math.max(0, Math.min(items.length - 1, fallbackIndex))
+}
+
+// The action Enter runs on the cursor row. Start and stop are the same key
+// because they are the same intent — "flip this container" — and needing to
+// know which one applies before pressing a key defeats the point.
+function primaryAction(container) {
+  if (!container) return ""
+  if (container.paused) return "unpause"
+  return container.running ? "stop" : "start"
+}
+
+// Single-letter shortcuts, checked against what the container supports so a
+// key never fires an action the buttons would not have offered. h/j/k/l and x
+// are consumed by PanelKeyCatcher before Kaj sees them, so they are absent
+// here by necessity, not by choice.
+function actionForKey(key, container) {
+  if (!container) return ""
+  var action = ""
+  if (key === "r") action = "restart"
+  else if (key === "o") action = "logs"
+  else if (key === "s") action = "shell"
+  else if (key === "p") action = container.paused ? "unpause" : "pause"
+  if (action === "") return ""
+  return availableActions(container).indexOf(action) === -1 ? "" : action
 }
 
 // Compose grouping is the organizing idea of the panel: people think in
