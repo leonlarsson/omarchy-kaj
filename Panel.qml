@@ -270,6 +270,14 @@ Panel {
       resetCursor()
     } else {
       searchActive = false
+      // Collapse on close, and drop the fetched values rather than merely
+      // hiding them: reopening the panel should never show an environment the
+      // user last looked at some time ago, and nothing keeps them in memory in
+      // the meantime.
+      if (kaj && expandedId !== "") kaj.forgetEnv(expandedId)
+      expandedId = ""
+      revealedKeys = ({})
+      helpOpen = false
     }
   }
 
