@@ -249,6 +249,31 @@ function browsableUrl(port) {
   return scheme + "://localhost:" + port.hostPort
 }
 
+// The ports worth putting in a row: published, and reachable from this machine.
+// An exposed-but-unpublished port has nothing to click, and a port bound to one
+// specific remote interface is not reachable via localhost, so neither earns
+// space in a bar popup.
+function linkablePorts(container) {
+  var out = []
+  if (!container) return out
+  // Deliberately not Array.isArray: this array is nested inside a container
+  // object that has been stored in a QML `var` property, and QML hands such
+  // arrays back as a list type that indexes and reports length exactly like an
+  // array while failing Array.isArray. The top-level helpers get away with the
+  // stricter check because they receive arrays built moments earlier in the
+  // same JS context; anything reached *through* a QML-held object cannot.
+  var ports = container.ports
+  if (!ports || ports.length === undefined) return out
+  var seen = {}
+  for (var i = 0; i < ports.length; i++) {
+    var url = browsableUrl(ports[i])
+    if (url === "" || seen[url]) continue
+    seen[url] = true
+    out.push({ port: ports[i].hostPort, url: url })
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Stats
 // ---------------------------------------------------------------------------

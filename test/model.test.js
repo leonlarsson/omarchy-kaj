@@ -514,3 +514,18 @@ test("busyLabel describes the action in progress", () => {
   assert.equal(model.busyLabel("removeVolumes"), "Removing…");
   assert.equal(model.busyLabel("mystery"), "Working…");
 });
+
+test("linkablePorts keeps only what can actually be opened", () => {
+  const c = container({ ports: [
+    { published: true, protocol: "tcp", hostIp: "0.0.0.0", hostPort: 8080 },
+    { published: true, protocol: "tcp", hostIp: "::", hostPort: 8080 },
+    { published: false, protocol: "tcp", hostIp: "", hostPort: 0 },
+    { published: true, protocol: "udp", hostIp: "0.0.0.0", hostPort: 53 },
+    { published: true, protocol: "tcp", hostIp: "192.168.1.5", hostPort: 9090 }
+  ] });
+  const links = model.linkablePorts(c);
+  // The v4/v6 pair collapses to one link; udp, unpublished, and the
+  // non-loopback binding are dropped.
+  assert.deepEqual(plain(links), [{ port: 8080, url: "http://localhost:8080" }]);
+  assert.deepEqual(plain(model.linkablePorts(container({}))), []);
+});

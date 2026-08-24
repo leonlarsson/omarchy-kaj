@@ -121,18 +121,49 @@ Item {
         textFormat: Text.PlainText
       }
 
-      Text {
+      // Status and published ports share a line: a bar popup has no room for a
+      // second row per container, and a port is only meaningful alongside
+      // whether the thing is actually up.
+      Row {
         width: parent.width
-        text: row.busy
-          ? Model.busyLabel(row.busyVerb)
-          : (row.container ? Model.statusSummary(row.container, row.now || Date.now()) : "")
-        color: row.busy
-          ? Color.accent
-          : (row.severity === "error" ? Color.urgent : row.dim)
-        font.family: row.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
-        textFormat: Text.PlainText
+        spacing: Style.space(6)
+
+        Text {
+          id: statusText
+          text: row.busy
+            ? Model.busyLabel(row.busyVerb)
+            : (row.container ? Model.statusSummary(row.container, row.now || Date.now()) : "")
+          color: row.busy
+            ? Color.accent
+            : (row.severity === "error" ? Color.urgent : row.dim)
+          font.family: row.fontFamily
+          font.pixelSize: Style.font.caption
+          textFormat: Text.PlainText
+        }
+
+        Repeater {
+          model: row.running && !row.busy ? Model.linkablePorts(row.container) : []
+
+          Text {
+            required property var modelData
+
+            text: ":" + modelData.port
+            color: portMouse.containsMouse ? Color.accent : Util.alpha(row.foreground, 0.75)
+            font.family: row.fontFamily
+            font.pixelSize: Style.font.caption
+            font.underline: portMouse.containsMouse
+            textFormat: Text.PlainText
+
+            MouseArea {
+              id: portMouse
+              anchors.fill: parent
+              anchors.margins: -Style.space(3)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: if (row.kaj) row.kaj.openPort(modelData.url)
+            }
+          }
+        }
       }
     }
 
