@@ -3,38 +3,30 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// One container. Renders state, live usage, and the actions valid for that
-// state — Model.availableActions() decides which, so the panel can never offer
-// "start" on something already running.
-//
-// Every Text in here is PlainText. Container names and image tags come from
-// images the user may not have built, and QML's RichText would parse an
-// <img src="file:///..."> hidden in one of them.
+// One container: state, live usage, and the actions valid for that state.
+// Every Text here is PlainText. Names and tags come from untrusted images.
 Item {
   id: row
 
   property var container: null
   property var stats: null
   property var kaj: null
-  // Driven by the panel's clock so uptime ages in place. Falling back to
-  // Date.now() keeps the row correct if it is ever used without one.
+  // Driven by the panel's clock so uptime ages in place.
   property double now: 0
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property bool showStats: true
   property bool readOnly: false
-  // The verb currently running against this container, or "" when idle.
+  // The verb running against this container, or empty when idle.
   property string busyVerb: ""
   readonly property bool busy: busyVerb !== ""
-  // Keyboard cursor. Distinct from hover so a mouse passing over the panel
-  // never looks like a selection the keyboard would act on.
+  // Keyboard cursor. Separate from hover, so passing the mouse over the panel
+  // never looks like a selection.
   property bool hasCursor: false
   property bool expanded: false
   property var env: null
-  // Which keys are currently revealed. Owned by the panel, not by this row:
-  // the list Repeater rebuilds its delegates on every refresh, so anything
-  // kept here is destroyed along with the row a few seconds after the user
-  // clicks — which looked exactly like the reveal spontaneously undoing itself.
+  // Which keys are revealed. Owned by the panel: the Repeater rebuilds delegates
+  // on every refresh, and anything kept here dies with the row.
   property var revealed: ({})
 
   signal actionRequested(string action)
@@ -42,16 +34,13 @@ Item {
 
   readonly property string severity: Model.containerSeverity(container)
   readonly property bool running: container ? container.running === true : false
-  // In read-only mode the buttons that cannot fire are not drawn at all. A row
-  // of greyed-out icons is a row of things to try clicking; leaving only what
-  // works says the same thing without the invitation.
+  // In read-only mode the buttons that cannot fire are not drawn at all.
   readonly property var actions: Model.availableActions(container, readOnly)
   readonly property color dim: Util.alpha(foreground, 0.6)
   readonly property real memoryPressure: Model.memoryPressure(container, stats)
   readonly property real cpuPressure: Model.cpuPressure(container, stats)
-  // Stats and actions share one right-anchored slot, so both sit at the same
-  // fixed edge on every row instead of drifting with the name length or the
-  // number of buttons a given state happens to offer.
+  // Stats and actions share one right-anchored slot, so both sit at the same edge
+  // on every row.
   readonly property real rightReserve: Style.space(150)
   readonly property bool actionsShown: hasCursor || rowHover.hovered || busy || expanded
 
@@ -77,8 +66,7 @@ Item {
       : (rowHover.hovered ? Util.alpha(row.foreground, 0.06) : "transparent")
     Behavior on color { ColorAnimation { duration: 90 } }
 
-    // An accent bar on the selected row, so the cursor is legible even where
-    // the fill tint is subtle against the theme background.
+    // An accent bar on the selected row, so the cursor is legible in any theme.
     Rectangle {
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
@@ -132,9 +120,8 @@ Item {
         Text {
           width: envBlock.width - x
           text: shown ? modelData.value : modelData.masked
-          // Dots on their own give no sign that they can be clicked, so
-          // hovering brings them to full strength, the same thing the pointer
-          // cursor says: this one is yours to open.
+          // Dots give no sign that they can be clicked, so hover brings them to full
+          // strength.
           color: shown || valueMouse.containsMouse ? row.foreground : row.dim
           font.family: row.fontFamily
           font.pixelSize: Style.font.caption
@@ -143,9 +130,8 @@ Item {
 
           MouseArea {
             id: valueMouse
-            // Sized to the painted text, not to the row: the value Text
-            // stretches to the right edge so long values can elide, and
-            // filling it would light the dots up from half a row away.
+            // Sized to the painted text. The value Text runs to the right edge so long
+            // values can elide, and filling it would light the dots up from far away.
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             anchors.leftMargin: -Style.space(2)
@@ -160,13 +146,8 @@ Item {
     }
   }
 
-  // A HoverHandler rather than a MouseArea, and the difference is the whole
-  // bug: a child MouseArea (every action button has one) takes hover away from
-  // a parent MouseArea, so the moment a button appeared under the pointer the
-  // row stopped counting as hovered, the buttons hid, hover returned to the
-  // row, and they reappeared — flickering many times a second. A HoverHandler
-  // observes the pointer over the row and all its children instead of
-  // competing for it.
+  // A HoverHandler, not a MouseArea. A child MouseArea takes hover from a parent
+  // MouseArea, so buttons under the pointer made the row flicker.
   HoverHandler {
     id: rowHover
   }
@@ -175,18 +156,15 @@ Item {
     id: layout
     anchors.left: parent.left
     anchors.right: parent.right
-    // Pinned to the top rather than centred: an expanded row grows downward,
-    // and centring would push the container's own line into the middle of its
-    // own environment list.
+    // Pinned to the top, because an expanded row grows downward.
     anchors.top: parent.top
     anchors.topMargin: Style.space(5)
     anchors.leftMargin: Style.space(6)
     anchors.rightMargin: Style.space(6)
     spacing: Style.space(9)
 
-    // Status indicator. A ring rather than a fill for stopped containers, so
-    // state is legible without relying on colour alone, and a glyph in place of
-    // the dot for states whose shape says more than a colour can.
+    // Status indicator. A ring for stopped containers, so state does not rely on
+    // colour alone. A glyph where the shape says more than a colour can.
     Item {
       anchors.verticalCenter: parent.verticalCenter
       width: Style.space(8)
@@ -214,9 +192,7 @@ Item {
       border.width: row.running ? 0 : 1
       border.color: row.severityColor
 
-      // Transient states are the ones worth animating: an action in flight,
-      // restarting, and waiting on a healthcheck. A still dot would read as
-      // settled when it is not.
+      // Only transient states pulse: an action in flight, restarting, or starting.
       SequentialAnimation on opacity {
         running: row.busy || (row.container
           ? (row.container.restarting === true || row.container.health === "starting")
@@ -243,9 +219,7 @@ Item {
         textFormat: Text.PlainText
       }
 
-      // Status and published ports share a line: a bar popup has no room for a
-      // second row per container, and a port is only meaningful alongside
-      // whether the thing is actually up.
+      // Status and ports share a line. A popup has no room for a second row.
       Row {
         width: parent.width
         spacing: Style.space(6)
@@ -289,14 +263,10 @@ Item {
       }
     }
 
-    // Live usage. Fixed width so rows stay aligned as numbers change instead of
-    // jittering the action buttons left and right.
+    // Live usage. Fixed width so rows stay aligned as the numbers change.
 
-    // Actions stay hidden until the row is hovered or holds the keyboard
-    // cursor. Six buttons on every row turned the panel into a wall of icons,
-    // and only one row is ever being acted on. Opacity rather than visibility,
-    // so the space stays reserved and the stats column does not shift as the
-    // pointer moves down the list.
+    // Actions stay hidden until the row is hovered or holds the cursor.
+    // Opacity, not visibility, so the space stays reserved and nothing shifts.
   }
 
   Column {
@@ -306,8 +276,7 @@ Item {
     visible: row.showStats && row.running && row.stats !== null
     width: Style.space(62)
     spacing: Style.space(1)
-    // Fades out as the actions fade in: they occupy the same slot, and only
-    // one of them is useful at a time.
+    // Fades out as the actions fade in. They share one slot.
     opacity: row.actionsShown ? 0 : 1
 
     Text {
@@ -330,10 +299,8 @@ Item {
       textFormat: Text.PlainText
     }
 
-    // A meter rather than a second number: the stats column is a glance, and
-    // "483 KB / 512 MB" does not fit in it. Drawn only when the container has
-    // a limit of its own — against the host's memory the bar would be a
-    // sliver on every row and mean nothing.
+    // A meter, not a second number: "483 KB / 512 MiB" does not fit here.
+    // Drawn only when the container has its own limit.
     Rectangle {
       width: parent.width
       height: Style.space(2)
@@ -376,9 +343,7 @@ Item {
         required property string modelData
 
         readonly property bool destructive: Model.isDestructive(modelData)
-        // Read-only mode leaves logs alone, because reading is the thing the
-        // mode is for. It does not exempt `shell`: a prompt inside the
-        // container can change more than any other button here.
+        // Read-only leaves logs alone. It does not exempt shell.
         readonly property bool inspectOnly: modelData === "logs"
 
         iconText: {
@@ -395,8 +360,7 @@ Item {
           }
         }
 
-        // The tooltip is where a mouse user discovers the keyboard, so every
-        // one names its key.
+        // The tooltip is where a mouse user learns the key.
         tooltipText: {
           var key = Model.actionHotkey(modelData)
           return baseTooltip + (key === "" ? "" : "  (" + key + ")")

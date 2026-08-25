@@ -5,21 +5,15 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Kaj's panel: containers grouped by Compose project, because that is how
-// people think about them — "my app", not eleven unrelated names.
-//
-// Keyboard model. PanelKeyCatcher already claims h/j/k/l, x, Esc, Tab, Enter
-// and Space before Kaj sees a key, and forwards everything else as textKey.
-// Search is therefore entered deliberately with Ctrl+F or "/" rather than by
-// typing into the list: type-to-filter would swallow the whole alphabet and
-// permanently foreclose single-letter action keys. While the search field has
-// focus the catcher is `blocked`, which is the mechanism the base component
-// documents for exactly this case, so the two modes never fight over a key.
+// Kaj's panel: containers grouped by Compose project.
+// PanelKeyCatcher claims h/j/k/l, x, Esc, Tab, Enter and Space, and forwards the
+// rest as textKey. Search is opened with Ctrl+F or "/", never by typing into the
+// list, so single-letter action keys stay free. While the field has focus the
+// catcher is blocked, so the two modes never fight over a key.
 Panel {
   id: root
   moduleName: "mozzy.kaj"
-  // Gives `omarchy-shell mozzy.kaj toggle`, so the panel can be bound to a key
-  // in hyprland instead of only reachable by clicking the bar.
+  // Gives omarchy-shell mozzy.kaj toggle, so the panel can be bound to a key.
   ipcTarget: "mozzy.kaj"
   manageIpc: true
 
@@ -59,8 +53,8 @@ Panel {
     }
   }
 
-  // The refresh button means "this view, again": containers stream themselves,
-  // but every other view is a snapshot taken when it was opened.
+  // The refresh button means this view again. Containers stream themselves.
+  // Every other view is a snapshot taken when it was opened.
   function loadFor(next) {
     if (!kaj) return
     if (next === "images") kaj.loadImages()
@@ -69,8 +63,7 @@ Panel {
     else if (next === "disk") kaj.loadDisk()
   }
 
-  // A row's worth per press, clamped: far enough to feel like progress, near
-  // enough that nothing scrolls past unread.
+  // About one row per press.
   function scrollBy(delta) {
     panelFlick.contentY = Model.scrollTarget(panelFlick.contentY, delta,
       Style.space(46), panelFlick.contentHeight, panelFlick.height)
@@ -87,8 +80,7 @@ Panel {
 
   readonly property var allContainers: kaj ? kaj.containers : []
   readonly property var counts: Model.statusCounts(allContainers, query)
-  // Replaced only when the set or order of rows changes, so a container merely
-  // changing state does not rebuild every delegate. See Model.groupsKey.
+  // Replaced only when the set or order of rows changes. See Model.groupsKey.
   property var groups: []
   property string groupsKey: ""
 
@@ -104,23 +96,19 @@ Panel {
   onQueryChanged: rebuildGroups()
   onStatusFilterChanged: rebuildGroups()
   Component.onCompleted: rebuildGroups()
-  // The flat sequence the keyboard walks. Groups are a visual convenience, so
-  // j from the last row of one project lands on the first row of the next.
+  // The flat sequence the keyboard walks.
   readonly property var flatContainers: Model.flattenGroups(groups)
   readonly property bool filtering: query !== "" || statusFilter !== "all"
 
   // ---- Keyboard cursor -----------------------------------------------------
 
   property int cursorIndex: -1
-  // The cursor stays invisible until a key is actually pressed, so a
-  // mouse-driven panel never shows a stray highlight the user did not ask for.
+  // The cursor stays hidden until a key is pressed.
   property bool cursorActive: false
-  // Tracked by id, not position: an event can rebuild the list while you are
-  // three rows down, and the selection must stay on the container you chose.
+  // Tracked by id, not position: an event can rebuild the list under the cursor.
   property string cursorId: ""
 
-  // The cached list supplies the id; the container itself is looked up live, so
-  // Enter never acts on a state that has since changed.
+  // The cached list gives the id. The container is looked up live.
   readonly property var cursorContainer: {
     if (!cursorActive || cursorIndex < 0 || cursorIndex >= flatContainers.length) return null
     if (!kaj) return null
@@ -141,8 +129,7 @@ Panel {
     cursorId = cursorContainer ? cursorContainer.id : ""
   }
 
-  // h and l are handed to us by the key catcher and would otherwise go unused;
-  // stepping the status filter with them keeps every navigation key meaningful.
+  // h and l come from the key catcher and would otherwise go unused.
   function stepFilter(delta) {
     var index = Model.statusFilters.indexOf(statusFilter)
     if (index < 0) index = 0
@@ -157,10 +144,8 @@ Panel {
     resetCursor()
   }
 
-  // Also drops the scroll. Every caller is a change to what the list contains —
-  // a new filter, a new search, a new view — and staying at the old offset
-  // leaves you halfway down a list you have not seen the top of. A refresh
-  // deliberately does not come through here: that keeps its place.
+  // Also drops the scroll. Every caller changes what the list contains.
+  // A refresh does not come through here, so it keeps its place.
   function resetCursor() {
     cursorIndex = -1
     cursorId = ""
@@ -175,8 +160,7 @@ Panel {
     Qt.callLater(function () { searchField.forceActiveFocus() })
   }
 
-  // Esc in the field clears and leaves; the query is not worth preserving
-  // through an explicit cancel.
+  // Esc clears and leaves. The query is not worth keeping through a cancel.
   function cancelSearch() {
     query = ""
     searchField.text = ""
@@ -185,8 +169,7 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
 
-  // Enter keeps the query but hands focus back, so j/k drive the list that the
-  // search just narrowed — the fzf shape people already expect.
+  // Enter keeps the query but hands focus back, so j/k drive the narrowed list.
   function commitSearch() {
     keyCatcher.forceActiveFocus()
     if (flatContainers.length > 0) {
@@ -198,17 +181,11 @@ Panel {
 
   // ---- Actions -------------------------------------------------------------
 
-  // The one place a container action enters the panel. Destructive verbs are
-  // parked here until the user confirms; everything else runs immediately,
-  // because putting a dialog in front of "restart" is how people learn to click
-  // through the dialog that actually matters.
+  // The one place a container action enters the panel. Destructive verbs wait for
+  // a confirm. Everything else runs at once.
   function requestAction(action, container) {
     if (!kaj || !container) return
-    // Every refusal is decided here and reported the same way. It used to be
-    // split: keys checked first and flashed at the top, while a click or Space
-    // went straight to the service, was refused there, and surfaced as an
-    // error line at the bottom — the same refusal in two places depending on
-    // how you asked for it.
+    // Every refusal is decided here and reported the same way.
     var reason = Model.unavailableReason(action, container, root.readOnly)
     if (reason !== "") { flash(reason); return }
     if (action === "logs") { kaj.openLogs(container); return }
@@ -259,13 +236,11 @@ Panel {
   }
 
   function handleTextKey(text) {
-    // Covers both "/" and Ctrl+F; see Model.isSearchKey for why Ctrl+F has to
-    // be recognised here by its control character rather than as a shortcut.
+    // Covers "/" and Ctrl+F. See Model.isSearchKey.
     if (Model.isSearchKey(text)) { openSearch(); return }
     if (text === "?") { helpOpen = !helpOpen; return }
     if (text === "e") { toggleExpanded(cursorContainer); return }
-    // The status filter is a property of the container list, so it gets a key
-    // that only means something there.
+    // The status filter belongs to the container list, so it gets its own key.
     if (text === "f") { if (view === "containers") stepFilter(1); return }
     var container = cursorContainer
     if (!container) return
@@ -274,8 +249,7 @@ Panel {
     requestAction(action, container)
   }
 
-  // Pending destructive action, held while the confirm dialog is up. Kaj never
-  // performs one of these directly from a click.
+  // Pending destructive action, held while the dialog is up.
   property string pendingAction: ""
   property var pendingContainer: null
 
@@ -287,15 +261,12 @@ Panel {
     if (opened) keyCatcher.forceActiveFocus()
   }
 
-  // A keystroke that cannot act has to say so. Silence leaves the user unable
-  // to tell an unavailable action from a broken keybind, which is how "x does
-  // nothing" becomes a bug report instead of a shrug.
+  // A keystroke that cannot act must say so. Silence looks like a broken key.
   property string notice: ""
   property bool helpOpen: false
-  // Only one row is expanded at a time: the panel is a bar popup, not a table.
+  // Only one row is expanded at a time.
   property string expandedId: ""
-  // Reveals live here rather than in the row for the same reason expandedId
-  // does: rows are recreated on every refresh, panel state is not.
+  // Reveals live here, not in the row: rows are recreated on every refresh.
   property var revealedKeys: ({})
 
   function toggleReveal(key) {
@@ -334,11 +305,8 @@ Panel {
     onTriggered: root.notice = ""
   }
 
-  // Uptime is derived from a fixed startedAt, so nothing in the container data
-  // changes as it ages. Without a clock of its own the label would sit at
-  // whatever it read when the list was last rebuilt — which is why it could
-  // show "Up 5s" long after the fact while live stats kept moving. Ticking only
-  // while the panel is open keeps a closed panel completely idle.
+  // Uptime comes from a fixed startedAt, so the row needs a clock to age.
+  // It ticks only while the panel is open.
   property double nowMs: Date.now()
 
   Timer {
@@ -349,8 +317,7 @@ Panel {
     onTriggered: root.nowMs = Date.now()
   }
 
-  // Every open starts from the configured filter with no stale query or cursor
-  // left over from last time.
+  // Every open starts from the configured filter, with no stale query or cursor.
   onOpenedChanged: {
     if (opened) {
       view = "containers"
@@ -363,10 +330,8 @@ Panel {
       resetCursor()
     } else {
       searchActive = false
-      // Collapse on close, and drop the fetched values rather than merely
-      // hiding them: reopening the panel should never show an environment the
-      // user last looked at some time ago, and nothing keeps them in memory in
-      // the meantime.
+      // Collapse on close and drop the fetched values. Reopening must never show an
+      // environment read some time ago.
       if (kaj && expandedId !== "") kaj.forgetEnv(expandedId)
       expandedId = ""
       revealedKeys = ({})
@@ -374,9 +339,7 @@ Panel {
     }
   }
 
-  // Ctrl+F as a real shortcut rather than sniffing for the raw control byte the
-  // key catcher would otherwise deliver through textKey. Gated on `opened` so
-  // it cannot fire while the panel is closed.
+  // Ctrl+F as a real shortcut. Gated on opened so it cannot fire when closed.
 
   function scrollPanel(delta) {
     panelFlick.contentY = Math.max(
@@ -408,8 +371,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(480))
-    // The pinned rows are always shown in full; only the list is allowed to
-    // run out of room and scroll.
+    // The pinned rows always show in full. Only the list scrolls.
     contentHeight: panel.fittedContentHeight(pinnedTop.implicitHeight
       + content.implicitHeight + pinnedBottom.implicitHeight + Style.space(20))
 
@@ -417,9 +379,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       // While the field has focus every key belongs to it, including j and x.
-      // While the confirm dialog is up it owns every key. Without this the
-      // catcher underneath kept interpreting them, so an arrow key aimed at
-      // Cancel/Remove stepped the status filter behind the dialog instead.
+      // While the dialog is up it owns every key.
       blocked: (root.searchActive && searchField.activeFocus) || confirm.opened
 
       onCloseRequested: {
@@ -428,16 +388,11 @@ Panel {
       }
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
-        // Left/right always steps the view. It used to step the status filter
-        // in the container list and the view everywhere else, which read as
-        // clever and meant a keyboard user could never leave the container
-        // list at all: the only key that changed views did something else on
-        // the view they started in. The filter got its own key instead.
+        // Left and right always step the view. The filter has its own key.
         if (dx !== 0) { root.stepView(dx); return }
         if (dy === 0) return
-        // Down/up moves the cursor where there is something to select, and
-        // scrolls where there is not. Volumes and Networks have no actions,
-        // so a selected row there would be a highlight that does nothing.
+        // Down and up move the cursor where there is something to select, and scroll
+        // where there is not. Volumes and Networks have no actions.
         if (root.view === "containers") root.moveCursorBy(dy)
         else root.scrollBy(dy)
       }
@@ -445,11 +400,8 @@ Panel {
       onDeleteRequested: root.removeCursor()
       onTextKey: function (text) { root.handleTextKey(text) }
 
-      // Only the list scrolls. The header, tabs, and filter row are how you
-      // navigate, and a long container list used to carry them off the top of
-      // the panel: h and l still changed views, but you could not see which
-      // view you had landed on. The error line is pinned for the same reason —
-      // it is what tells you the last thing you asked for did not happen.
+      // Only the list scrolls. The header, tabs and filter row are how you navigate,
+      // and a long list used to carry them off the top. The error line is pinned too.
       Column {
         id: pinnedTop
         anchors.top: parent.top
@@ -489,9 +441,7 @@ Panel {
                 textFormat: Text.PlainText
               }
 
-              // Read-only is a mode with real consequences for what the
-              // buttons do, so it is stated in the header rather than hidden
-              // in settings.
+              // Read-only changes what every button does, so the header states it.
               Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.readOnly
@@ -505,9 +455,7 @@ Panel {
                   anchors.centerIn: parent
                   spacing: Style.space(4)
 
-                  // The lock carries the meaning at a glance; the word is
-                  // kept because an icon alone is a guess about what is
-                  // locked, and this mode is worth being unambiguous about.
+                  // The lock reads at a glance. The word stays, because an icon alone is a guess.
                   Text {
                     text: "󰌾"
                     color: root.dim
@@ -529,17 +477,13 @@ Panel {
 
             Text {
               width: parent.width
-              // The subtitle doubles as the transient notice line. A message
-              // appended below the list is never seen: it sits under a
-              // scrolling column, off screen, and is gone before anyone
-              // scrolls to it. Here it is always visible and costs no layout
-              // shift, because the line already exists.
+              // The subtitle doubles as the notice line. A message under a scrolling list is
+              // never seen.
               text: {
                 if (root.notice !== "") return root.notice
                 if (!root.kaj) return ""
                 if (!root.reachable) return root.kaj.summary
-                // While filtering, the honest summary is what is on screen
-                // versus what exists — not the unfiltered total.
+                // While filtering, the honest summary is what is on screen versus what exists.
                 if (root.filtering) return root.flatContainers.length + " of " + root.kaj.totalCount + " shown"
                 return root.kaj.summary
               }
@@ -575,10 +519,8 @@ Panel {
             onClicked: root.searchActive ? root.cancelSearch() : root.openSearch()
           }
 
-          // Read-only is reachable from the panel because a setting nobody
-          // can find is a setting nobody uses: until now it could only be
-          // entered from the CLI. The click writes shell.json rather than
-          // flipping a local flag, so the lock survives a restart.
+          // Read-only is reachable from the panel, because a setting nobody can find is a
+          // setting nobody uses. The click writes shell.json, so the lock survives a restart.
           PanelActionButton {
             id: lockButton
             anchors.verticalCenter: parent.verticalCenter
@@ -616,9 +558,8 @@ Panel {
           id: searchField
           width: parent.width
           visible: root.searchActive
-          // Disabled when hidden so it cannot hold focus: a focused invisible
-          // field both captured typing into the query and left the key
-          // catcher unblocked, so every keystroke was handled twice.
+          // Disabled when hidden so it cannot hold focus. A focused invisible field made
+          // every keystroke count twice.
           enabled: root.searchActive
           height: visible ? implicitHeight : 0
           placeholderText: "Filter by name, service, project, or image"
@@ -644,8 +585,7 @@ Panel {
             root.commitSearch()
             event.accepted = true
           }
-          // Down from the field moves straight into the list without
-          // needing Enter first.
+          // Down from the field moves into the list without needing Enter.
           Keys.onDownPressed: function (event) {
             root.commitSearch()
             event.accepted = true
@@ -726,8 +666,7 @@ Panel {
               required property string modelData
               readonly property int count: root.counts ? (root.counts[modelData] || 0) : 0
 
-              // The count makes each chip informative rather than just a
-              // control: the numbers always add up to what clicking produces.
+              // The count makes each chip informative, and the numbers match what a click gives.
               text: Model.statusFilterLabel(modelData) + "  " + count
               selected: root.statusFilter === modelData
               foreground: modelData === "problems" && count > 0
@@ -735,8 +674,7 @@ Panel {
               accent: modelData === "problems" && count > 0 ? Color.urgent : Color.accent
               fontFamily: root.contentFontFamily
               fontSize: Style.font.caption
-              // An empty bucket stays clickable so its empty state can
-              // explain itself, but reads as unremarkable.
+              // An empty bucket stays clickable so its empty state can explain itself.
               opacity: count > 0 || root.statusFilter === modelData ? 1.0 : 0.45
               onClicked: root.setStatusFilter(modelData)
             }
@@ -797,8 +735,8 @@ Panel {
 
           // ---- Degraded states ---------------------------------------------
 
-          // Docker missing or unreachable is not an error to bury in a toast:
-          // it is the whole state of the panel, so it takes the whole panel.
+          // Docker missing or unreachable is the whole state of the panel, so it takes
+          // the whole panel.
           Column {
             width: parent.width
             spacing: Style.space(8)
@@ -829,10 +767,8 @@ Panel {
               textFormat: Text.PlainText
             }
 
-            // Deliberately not a button. Starting a system daemon is a
-            // privileged action, and Kaj would rather hand over a command the
-            // user runs knowingly than escalate on their behalf from a bar
-            // popup — a click there is too cheap for what it does.
+            // Not a button. Starting a daemon is privileged, so Kaj hands over a command
+            // rather than escalating from a bar popup.
           }
 
           // ---- Empty states ------------------------------------------------
@@ -878,8 +814,7 @@ Panel {
                 readonly property string busyVerb: root.kaj && !modelData.standalone
                   ? root.kaj.busyAction(root.kaj.composeBusyKey(modelData.project)) : ""
 
-                // Same rule as the container rows: project actions appear when
-                // the group is hovered, not permanently.
+                // Project actions appear when the group is hovered, like the container rows.
                 HoverHandler {
                   id: groupHover
                 }
@@ -890,8 +825,7 @@ Panel {
                   anchors.right: composeRow.left
                   anchors.rightMargin: Style.space(8)
                   anchors.verticalCenter: parent.verticalCenter
-                  // Compose project name, or a plain label for the containers
-                  // that belong to no project.
+                  // Compose project name, or a label for containers that belong to no project.
                   text: groupBar.standalone
                     ? "CONTAINERS"
                     : (groupBar.project + "  ·  "
@@ -905,9 +839,8 @@ Panel {
                   elide: Text.ElideRight
                 }
 
-                // Whole-project actions, run through docker compose rather than
-                // by fanning out per-container commands: compose owns networks
-                // and dependency order, which a loop over containers does not.
+                // Whole-project actions run through docker compose, which owns the network and
+                // the dependency order.
                 Row {
                   id: composeRow
                   anchors.right: parent.right
@@ -953,8 +886,7 @@ Panel {
                   required property var modelData
 
                   width: content.width
-                  // Only the id comes from the cached row list; the data is
-                  // looked up live so a stable list still shows fresh state.
+                  // Only the id comes from the cached list. The data is looked up live.
                   container: root.kaj ? root.kaj.containerById(modelData.id) : null
                   stats: root.kaj && container ? root.kaj.statsFor(container) : null
                   kaj: root.kaj
@@ -1013,8 +945,7 @@ Panel {
                   Text {
                     width: parent.width
                     text: modelData.name
-                    // A dangling image has no name worth trusting, so it reads
-                    // as muted rather than pretending to be a real tag.
+                    // A dangling image has no name worth trusting, so it reads as muted.
                     color: modelData.dangling ? root.dim : root.contentForeground
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.body
@@ -1024,8 +955,7 @@ Panel {
 
                   Text {
                     width: parent.width
-                    // Whether anything uses it is the only question worth
-                    // answering here: an unused image is one you can delete.
+                    // Whether anything uses it is the only question worth answering here.
                     text: modelData.id + "  ·  " + modelData.created
                       + (modelData.containers === 0
                          ? "  ·  unused"
@@ -1099,8 +1029,7 @@ Panel {
 
                   Text {
                     width: parent.width
-                    // What is using it, which is the question `docker volume
-                    // ls` cannot answer and the reason to open this view.
+                    // What is using it. docker volume ls cannot answer this.
                     text: (modelData.project === "" ? "" : modelData.project + "  ·  ")
                       + Model.usageLabel(parent.parent.users)
                     color: parent.parent.users.length === 0 ? Color.accent : root.dim
@@ -1162,8 +1091,7 @@ Panel {
                   Text {
                     width: parent.width
                     text: modelData.name
-                    // The three networks every daemon is born with are context,
-                    // not findings, so they read as muted.
+                    // The three built-in networks are context, not findings.
                     color: modelData.builtin ? root.dim : root.contentForeground
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.body
@@ -1251,8 +1179,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                   width: Style.space(66)
                   horizontalAlignment: Text.AlignRight
-                  // Reclaimable is the number people act on, so it is the one
-                  // that gets the accent when there is anything to reclaim.
+                  // Reclaimable is the number people act on, so it gets the accent.
                   text: modelData.reclaimable > 0
                     ? Model.formatBytes(modelData.reclaimable) + " free"
                     : "—"
@@ -1281,13 +1208,9 @@ Panel {
       }
     }
 
-    // The gate in front of every destructive verb. It lives inside the panel
-    // surface rather than under the Panel root: that root is a zero-sized Item
-    // in the bar hierarchy, so anchors.fill there would size the dialog to
-    // nothing and the confirmation would silently never appear.
-    // Takes focus for as long as the dialog is open and hands every key to it.
-    // ConfirmDialog has no key handling of its own — it exposes handleKey and
-    // expects the host to call it, which is how the first-party panels drive it.
+    // The gate in front of every destructive verb. It lives inside the panel surface:
+    // the Panel root is a zero-sized Item, so a dialog anchored there never appears.
+    // ConfirmDialog exposes handleKey and expects the host to call it.
     Item {
       id: confirmKeys
       anchors.fill: parent
@@ -1298,10 +1221,8 @@ Panel {
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function (event) {
         if (!confirm.opened) return
-        // h/j/k/l reach the dialog as plain letters, so they are translated to
-        // the left/right the dialog understands. Anything the dialog does not
-        // claim is swallowed rather than passed down, so no keystroke leaks
-        // through to the list while a confirmation is pending.
+        // h/j/k/l reach the dialog as letters, so they are translated to left and right.
+        // Anything else is swallowed, so no key leaks through to the list.
         if (event.text === "h" || event.text === "l"
             || event.text === "j" || event.text === "k") {
           confirm.selectedIndex = confirm.selectedIndex === 0 ? 1 : 0

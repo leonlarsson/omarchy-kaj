@@ -4,9 +4,8 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// The bar face of Kaj: one glyph, one count, one colour. Everything else lives
-// in Panel.qml. The rule for this file is that a glance should answer "is
-// anything wrong?" without opening anything.
+// The bar face of Kaj: one glyph, one count, one colour.
+// A glance must answer "is anything wrong?" without opening the panel.
 BarWidget {
   id: root
   moduleName: "mozzy.kaj"
@@ -27,9 +26,7 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
   }
 
-  // The shell hands widget settings to the bar widget, so this is where they
-  // enter the plugin. Forward them to the service, which is what actually acts
-  // on readOnly, showStats, and the rest.
+  // The shell hands widget settings here. Forward them to the service.
   function pushSettings() {
     if (kaj) kaj.settings = root.settings || ({})
   }
@@ -66,10 +63,9 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
 
-    // The count rides in the label rather than as a sibling Item: WidgetButton
-    // derives implicitWidth from its own text, so anything anchored outside it
-    // would overlap the neighbouring widget on a busy bar. A vertical bar has
-    // no room for the number, so it shows the glyph alone.
+    // The count is part of the label, not a sibling. WidgetButton sizes itself from
+    // its own text, so anything outside it would overlap the next widget.
+    // A vertical bar has no room for the number.
     text: {
       if (root.vertical || root.degraded || root.runningCount <= 0) return "󰡨"
       return "󰡨 " + root.runningCount
@@ -77,8 +73,7 @@ BarWidget {
 
     tooltipText: root.kaj ? root.kaj.summary : "Docker"
 
-    // Severity maps onto the bar's own palette rather than hardcoded colours,
-    // so Kaj follows `omarchy theme set` like every first-party widget does.
+    // Severity uses the bar's palette, so Kaj follows omarchy theme set.
     foreground: {
       var base = root.bar ? root.bar.barForeground : Color.foreground
       if (root.degraded) return Qt.darker(base, 1.55)

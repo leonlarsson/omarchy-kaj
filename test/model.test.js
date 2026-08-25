@@ -419,20 +419,6 @@ test("Enter runs one intent regardless of container state", () => {
   assert.equal(model.primaryAction(container({ running: true, paused: true })), "unpause");
 });
 
-test("letter shortcuts never fire an action the buttons would not offer", () => {
-  const running = container({ running: true });
-  const stopped = container({ running: false });
-  assert.equal(model.actionForKey("r", running), "restart");
-  assert.equal(model.actionForKey("o", running), "logs");
-  assert.equal(model.actionForKey("s", running), "shell");
-  assert.equal(model.actionForKey("p", running), "pause");
-  // A stopped container has no shell to open and cannot be restarted.
-  assert.equal(model.actionForKey("s", stopped), "");
-  assert.equal(model.actionForKey("r", stopped), "");
-  assert.equal(model.actionForKey("o", stopped), "logs");
-  assert.equal(model.actionForKey("z", running), "");
-});
-
 test("search opens on / and on Ctrl+F's control character", () => {
   assert.ok(model.isSearchKey("/"));
   // Qt puts the ASCII control code for F in event.text for Ctrl+F.
@@ -482,7 +468,7 @@ test("intendedAction is separate from whether the action can run", () => {
   // the two is what made an unavailable action indistinguishable from a dead
   // keybind.
   assert.equal(model.intendedAction("s", stopped), "shell");
-  assert.equal(model.actionForKey("s", stopped), "");
+  assert.equal(model.unavailableReason("shell", stopped, false), stopped.name + " is not running");
   assert.equal(model.intendedAction("z", stopped), "");
   // p flips with the container's state.
   assert.equal(model.intendedAction("p", container({ running: true })), "pause");

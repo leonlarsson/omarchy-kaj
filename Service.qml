@@ -3,28 +3,17 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-// Kaj's engine. Owns every conversation with the Docker daemon and exposes the
-// result as plain properties for the UI to bind against.
-//
-// Two invariants hold everywhere in this file, and they are the reason the
-// plugin can be trusted with a root-equivalent socket:
-//
-//   1. Every command is an argv array. There is no bash -c, no string
-//      concatenation into a shell, and no interpolation of a container name,
-//      image tag, or label into a command line. Container metadata is written
-//      by whoever built the image; treating it as code would hand them the
-//      Docker socket, and the Docker socket is root.
-//   2. Nothing mutates without going through runAction(), which refuses while
-//      read-only mode is on and which the UI gates behind a confirm for the
-//      destructive verbs listed in Model.isDestructive().
+// Kaj's engine. Talks to the Docker daemon and exposes the result as properties.
+// Two rules hold everywhere in this file:
+// 1. Every command is an argv array. No bash -c, no text from a container in a
+//    command line. The Docker socket is root-equivalent.
+// 2. Nothing mutates except through runAction(), which refuses in read-only mode.
 Item {
   id: root
 
   property var shell: null
   property var manifest: null
-  // Pushed in by BarWidget.qml, which is where the shell delivers widget
-  // settings. Defaults mirror manifest.json so the service is usable before
-  // the widget mounts.
+  // Pushed in by BarWidget.qml. Defaults match manifest.json.
   property var settings: ({})
 
   // ---- Daemon reachability -------------------------------------------------
@@ -84,8 +73,8 @@ Item {
     whichProcess.running = true
   }
 
-  // Reachability is a separate question from installation: the binary can be
-  // present while the daemon is stopped or the user is not in the docker group.
+  // Installed and reachable are different: the binary can be there while the
+  // daemon is stopped or the user is not in the docker group.
   function checkDaemon() {
     if (!dockerInstalled) return
     if (pingProcess.running) return
@@ -93,10 +82,8 @@ Item {
     pingProcess.running = true
   }
 
-  // Snapshot is two processes rather than one, on purpose. Getting the ids and
-  // inspecting them in a single call would need `docker inspect $(docker ps
-  // -aq)`, and that needs a shell. Two argv-only processes cost one extra fork
-  // and keep the no-shell invariant absolute.
+  // Two processes on purpose. One call would need docker inspect $(docker ps -aq),
+  // and that needs a shell.
   function refresh() {
     if (!dockerInstalled || !daemonReachable) return
     if (idsProcess.running || inspectProcess.running) return
@@ -113,8 +100,7 @@ Item {
       applyContainers([])
       return
     }
-    // Ids come from the daemon and are hex digests, but they are still appended
-    // as separate argv entries rather than joined into a string.
+    // Ids are hex, but they are still passed as separate argv entries.
     var command = ["docker", "inspect", "--type", "container", "--format", inspectFormat]
     for (var i = 0; i < ids.length; i++) command.push(ids[i])
     _inspectBuffer = ""
@@ -122,17 +108,14 @@ Item {
     inspectProcess.running = true
   }
 
-  // Each {{json ...}} is encoded by Go, and every key is a literal we wrote, so
-  // no container-controlled text can break out of the JSON structure. This is
-  // the safe alternative to hand-building JSON in a Go template.
+  // Go encodes each {{json ...}} and every key is a literal, so container text
+  // cannot break out of the JSON.
   readonly property string inspectFormat: '{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"State":{{json .State}},"Labels":{{json .Config.Labels}},"Image":{{json .Config.Image}},"Ports":{{json .NetworkSettings.Ports}},"RestartCount":{{json .RestartCount}},"MemoryLimit":{{json .HostConfig.Memory}},"NanoCpus":{{json .HostConfig.NanoCpus}},"Mounts":{{json .Mounts}},"Networks":{{json .NetworkSettings.Networks}}}'
 
-  // Counts and severity always come from the full list, never from whatever the
-  // panel is currently filtered to, so the bar cannot under-report a problem
-  // just because a filter is hiding it.
+  // Counts always come from the full list, never the filtered one, so the bar
+  // cannot hide a problem.
   function applyContainers(list) {
-    // A snapshot that came back is proof the previous failure has passed, so
-    // the error clears itself rather than sitting in the panel forever.
+    // A snapshot that arrived proves the last failure is over.
     lastError = ""
     containers = list
     severity = Model.rollupSeverity(list)
@@ -144,9 +127,8 @@ Item {
 
   // ---- Images and disk -----------------------------------------------------
 
-  // Fetched when the view is opened and on explicit refresh, not streamed:
-  // images and disk usage change on the scale of builds and pulls, so a live
-  // subscription would cost two more processes to show numbers that rarely move.
+  // Fetched when the view opens and on refresh, not streamed. These numbers
+  // change on the scale of builds and pulls.
   property var images: []
   property var disk: []
   property var volumes: []
@@ -162,9 +144,7 @@ Item {
     imagesProcess.running = true
   }
 
-  // `docker system df -v` rather than `docker volume ls`, because only df
-  // reports each volume's size. It is the slower of the two on a large daemon,
-  // which is the price of the one column worth having.
+  // docker system df -v, not docker volume ls, because only df reports size.
   function loadVolumes() {
     if (!daemonReachable || volumesProcess.running) return
     loadingVolumes = true
@@ -172,9 +152,8 @@ Item {
     volumesProcess.running = true
   }
 
-  // Two steps for the same reason containers take two: `docker network ls`
-  // knows no subnets, and inspect returns labels as an object instead of the
-  // flat "a=1,b=2" string that cannot survive a comma.
+  // Two steps: docker network ls has no subnets, and inspect returns labels as an
+  // object instead of a flat string.
   function loadNetworks() {
     if (!daemonReachable || networkIdsProcess.running || networksProcess.running) return
     loadingNetworks = true
@@ -251,10 +230,8 @@ Item {
 
   // ---- Environment ---------------------------------------------------------
 
-  // Fetched only when a row is expanded, and dropped when it collapses. The
-  // main snapshot deliberately does not carry Env: holding every container's
-  // secrets in memory for the lifetime of the shell, to render them almost
-  // never, is a poor trade.
+  // Fetched only when a row is expanded, and dropped when it collapses.
+  // The main snapshot never carries Env.
   property var envById: ({})
 
   function loadEnv(container) {
@@ -288,11 +265,8 @@ Item {
 
   // ---- Actions -------------------------------------------------------------
 
-  // Which containers have an action in flight, as id -> verb. A map rather than
-  // a single id because actions run in parallel: one shared process meant that
-  // a `docker stop`, which waits ten seconds for SIGTERM before resorting to
-  // SIGKILL, silently swallowed every click on every other container for the
-  // whole of that wait.
+  // Which containers have an action running, as id -> verb. A map, not one id:
+  // docker stop waits ten seconds, and one shared process blocked every other row.
   property var busyActions: ({})
 
   function busyAction(id) {
@@ -308,9 +282,7 @@ Item {
     busyActions = next
   }
 
-  // Group actions share the per-target busy map, keyed by project rather than
-  // container id, so a project mid-action disables its own header without
-  // touching anything else.
+  // Group actions use the same map, keyed by project.
   function composeBusyKey(project) { return "compose:" + project }
 
   function composeAction(project, verb) {
@@ -335,22 +307,21 @@ Item {
     proc.running = true
   }
 
-  // The single mutation entry point. Every button in the UI routes here.
+  // The single mutation entry point. Every button routes here.
   function runAction(action, container) {
     if (!container || !daemonReachable) return
     if (readOnly) {
       lastError = "Read-only mode is on"
       return
     }
-    // Serialised per container, parallel across them: two verbs racing on one
-    // container is incoherent, but stopping one while starting another is not.
+    // One verb at a time per container, but containers run in parallel.
     if (busyAction(container.id) !== "") return
 
     var command = commandFor(action, container)
     if (!command) return
 
     lastError = ""
-    // Stopping something on purpose must not notify the person who asked.
+    // Stopping on purpose must not notify the person who asked.
     if (action === "stop" || action === "restart" || action === "remove" || action === "removeVolumes") {
       markSelfInitiated(container.id)
     }
@@ -371,12 +342,12 @@ Item {
   function finishAction(id, verb, failure) {
     setBusy(id, "")
     if (failure && failure !== "") lastError = failure
-    // The event stream reports the real state change; this only settles the UI
-    // when an action turned out to be a no-op and produced no event.
+    // The event stream reports the real change. This only settles the UI when an
+    // action was a no-op and produced no event.
     refresh()
   }
 
-  // One process per in-flight action, destroyed when it exits.
+  // One process per action, destroyed when it exits.
   Component {
     id: actionComponent
 
@@ -397,8 +368,7 @@ Item {
     }
   }
 
-  // Maps a verb to argv. The container id is always passed as its own argv
-  // entry; it is never formatted into a string.
+  // Maps a verb to argv. The container id is always its own argv entry.
   function commandFor(action, container) {
     var id = container.id
     if (id === "") return null
@@ -414,10 +384,8 @@ Item {
     }
   }
 
-  // Logs and shells open in a terminal rather than in the panel. A bar popup is
-  // the wrong place to hold a long-lived interactive session, and handing the
-  // stream to a real terminal means Kaj never has to render attacker-controlled
-  // bytes as rich text.
+  // Logs and shells open in a terminal, not in the panel. A popup is the wrong
+  // place for a long session, and a terminal renders the bytes, not Kaj.
   function openLogs(container) {
     if (!container) return
     Quickshell.execDetached([
@@ -426,10 +394,8 @@ Item {
     ])
   }
 
-  // A shell is not an inspection. `docker exec` hands over a root prompt inside
-  // the container, which can delete files, kill processes, and rewrite data —
-  // more than any button on the row can do. Read-only refuses it for the same
-  // reason it refuses `stop`. Logs, which really only read, stay open.
+  // A shell is not an inspection. docker exec gives a root prompt in the container,
+  // which can change more than any button here.
   function openShell(container) {
     if (!container || !container.running) return
     if (readOnly) { lastError = "Read-only mode is on"; return }
@@ -439,11 +405,8 @@ Item {
     ])
   }
 
-  // Read-only is a setting, so toggling it writes the setting rather than
-  // holding a second copy of the truth in the panel. `omarchy bar set` owns
-  // shell.json; --json keeps the value a real boolean, since without it the
-  // string "false" would be written and read back as a value that is not
-  // false. Kaj's own argv rule still holds: every word here is a literal.
+  // Toggling read-only writes the setting, so the panel holds no second copy.
+  // --json keeps the value a real boolean. Every word here is a literal.
   function setReadOnly(next) {
     Quickshell.execDetached([
       "omarchy", "bar", "set", "mozzy.kaj", "readOnly",
@@ -457,9 +420,8 @@ Item {
   }
 
   function copyText(text) {
-    // The value goes over stdin, never argv. Copying a container's environment
-    // value is the one place Kaj handles a secret directly, and an argv entry
-    // would expose it to every process that can read /proc.
+    // The value goes over stdin, never argv. An argv entry would expose the secret
+    // to every process that can read /proc.
     if (copyProcess.running) return
     copyProcess.pending = String(text === undefined || text === null ? "" : text)
     copyProcess.command = ["wl-copy"]
@@ -488,11 +450,8 @@ Item {
     }
   }
 
-  // Reachability is decided by the exit code in onExited, never by either
-  // stream handler on its own. Both stdout and stderr finish on every run —
-  // including when one of them is empty — so a stderr handler that concluded
-  // "unreachable" would clobber a successful probe a moment after stdout had
-  // already reported success.
+  // Reachability is decided by the exit code in onExited, never by a stream
+  // handler. Both streams finish on every run, including when empty.
   Process {
     id: pingProcess
     property string version: ""
@@ -517,9 +476,8 @@ Item {
         root.refresh()
         if (became) root.startStreams()
       } else {
-        // A daemon that is down reports it on stderr; keep that text, because
-        // "permission denied on the socket" and "daemon not running" need very
-        // different fixes from the person reading the panel.
+        // A stopped daemon reports on stderr. Keep the text: a permission problem and a
+        // stopped daemon need different fixes.
         root.daemonError = pingProcess.failure !== ""
           ? pingProcess.failure
           : "Could not reach the Docker daemon"
@@ -536,8 +494,7 @@ Item {
     stdout: StdioCollector {
       onStreamFinished: {
         var ids = String(text || "").split("\n").filter(function (line) {
-          // Accept only what a container id can actually be. A daemon that
-          // returned something else is a daemon we do not talk to.
+          // Accept only valid container ids.
           return /^[0-9a-f]{12,64}$/.test(line.trim())
         }).map(function (line) { return line.trim() })
         root.inspectIds(ids)
@@ -555,8 +512,7 @@ Item {
     }
     stderr: StdioCollector {
       onStreamFinished: {
-        // Containers removed between listing the ids and inspecting them are
-        // expected; anything else is worth showing.
+        // Containers removed between the two commands are expected.
         var message = Model.firstRealError(text)
         if (message !== "") root.lastError = message
       }
@@ -577,9 +533,8 @@ Item {
 
   // ---- Live streams --------------------------------------------------------
 
-  // Kaj is event-driven, not poll-driven: `docker events` pushes state changes
-  // the instant they happen, so the panel is correct without a timer hammering
-  // the daemon. The reconcile timer below is only a safety net.
+  // Kaj is event-driven. docker events pushes changes as they happen.
+  // The timer below is only a safety net.
   function startStreams() {
     if (!daemonReachable) return
     if (!eventsProcess.running) {
@@ -609,8 +564,7 @@ Item {
       onRead: function (line) { root.handleEvent(line) }
     }
     onExited: function () {
-      // The daemon restarting or the socket dropping ends the stream. Re-probe
-      // rather than silently going stale.
+      // A daemon restart ends the stream. Re-probe instead of going stale.
       root.daemonReachable = false
       reconnectTimer.restart()
     }
@@ -637,14 +591,12 @@ Item {
       var status = String(event.status || event.Action || "")
       if (notifyOnExit && status === "die") announceExit(event)
       if (notifyOnExit && status === "oom") announceOom(event)
-      // Anything that changes container state warrants a re-read. Refresh is
-      // cheap and coalesced by the running-guard in refresh().
+      // Any state change means re-read. refresh() coalesces the calls.
       refreshTimer.restart()
     }
   }
 
-  // Records a container Kaj itself just stopped or removed, so the die event
-  // that follows does not get announced back to the person who asked for it.
+  // Records a container Kaj just stopped, so the die event is not announced back.
   property var _selfInitiated: ({})
 
   function markSelfInitiated(id) {
@@ -656,22 +608,15 @@ Item {
 
   function wasSelfInitiated(id) {
     var at = _selfInitiated[String(id)]
-    // Only recent enough to be the same act. A container stopped through Kaj an
-    // hour ago and crashing now deserves the notification.
+    // Only recent enough to be the same act.
     return at !== undefined && (Date.now() - at) < 15000
   }
 
-  // A container that failed is worth interrupting someone for. A container that
-  // did what it was told is not, and the difference is entirely in the exit
-  // code: 143 is SIGTERM, which is exactly what `docker stop` sends, and 130 is
-  // SIGINT. Treating those as failures would turn every ordinary stop into an
-  // alert, which is the fastest way to teach someone to ignore the alerts.
+  // A container that failed is worth an interruption. One that did what it was
+  // told is not. 143 is SIGTERM, which docker stop sends, and 130 is SIGINT.
   readonly property var quietExitCodes: [0, 130, 143]
 
-  // A container in a restart loop dies every few seconds. Notifying on each one
-  // buries the desktop in identical popups and makes the notification worthless
-  // precisely when something is actually wrong, so each container gets one
-  // notification per cooldown window no matter how often it flaps.
+  // A restart loop dies every few seconds. One notification per cooldown window.
   property var _lastNotified: ({})
   readonly property int notifyCooldownMs: 60000
 
@@ -695,14 +640,11 @@ Item {
     if (!shouldNotify(event.id)) return
 
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
-    // Normal urgency, so it behaves like a notification rather than a modal:
-    // critical is sticky in most daemons and has to be dismissed by hand, which
-    // is far too much ceremony for a container exiting.
+    // Normal urgency. Critical is sticky in most daemons and must be dismissed.
     notify("Container exited", name + " exited with code " + exitCode, "normal")
   }
 
-  // Out of memory is the one case that earns critical. It is rare, it is never
-  // something the user asked for, and it is the failure people most often miss.
+  // Out of memory earns critical. It is rare, unasked for, and easy to miss.
   function announceOom(event) {
     var attributes = event.Actor && event.Actor.Attributes ? event.Actor.Attributes : {}
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
@@ -711,7 +653,7 @@ Item {
 
   // ---- Timers --------------------------------------------------------------
 
-  // Coalesces a burst of events (a compose up emits many) into one refresh.
+  // Coalesces a burst of events into one refresh.
   Timer {
     id: refreshTimer
     interval: 250
@@ -726,8 +668,7 @@ Item {
     onTriggered: root.checkDaemon()
   }
 
-  // Safety net only. If an event is ever missed, this bounds how long the panel
-  // can disagree with reality.
+  // Safety net. Bounds how long the panel can disagree with reality.
   Timer {
     interval: Math.max(5, root.refreshIntervalSec) * 1000
     repeat: true
