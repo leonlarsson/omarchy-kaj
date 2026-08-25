@@ -43,6 +43,9 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 
 Containers, Images, Volumes, Networks, and Disk.
 
+Containers shows live CPU and memory, with a bar against the container's memory
+limit when it has one.
+
 Images lists what is on disk largest first and flags anything no container
 uses. Volumes shows each volume's size and the containers using it. Networks
 shows subnet and connected containers, with the built-in `bridge`, `host`, and
