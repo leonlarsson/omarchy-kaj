@@ -409,6 +409,30 @@ Panel {
     }
   }
 
+  // Every list view is the same shape: it fills the scrolling column, shows
+  // only for its own tab, and says something when it has nothing to show.
+  // Declared once so a new view cannot get the width or the empty state wrong.
+  component ViewSection: Column {
+    property string forView: ""
+    property bool loading: false
+    property bool empty: false
+    property string emptyText: ""
+
+    width: parent.width
+    spacing: Style.space(8)
+    visible: root.view === forView && root.reachable
+
+    Text {
+      width: parent.width
+      visible: parent.empty
+      text: parent.loading ? "Loading…" : parent.emptyText
+      color: root.dim
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.body
+      textFormat: Text.PlainText
+    }
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -763,7 +787,7 @@ Panel {
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: ScrollBar { id: panelScroll; policy: ScrollBar.AsNeeded }
 
         WheelHandler {
           onWheel: function (event) {
@@ -775,7 +799,10 @@ Panel {
 
         Column {
           id: content
-          width: panelFlick.width
+          // The scrollbar overlays the right edge, so its width is reserved
+          // rather than shared: the last action button on a row sat underneath
+          // it and could not be clicked cleanly.
+          width: panelFlick.width - panelScroll.width
           spacing: Style.space(10)
 
           // ---- Degraded states ---------------------------------------------
@@ -1045,20 +1072,11 @@ Panel {
 
           // ---- Images ------------------------------------------------------
 
-          Column {
-            width: parent.width
-            spacing: Style.space(3)
-            visible: root.view === "images" && root.reachable
-
-            Text {
-              width: parent.width
-              visible: root.kaj && root.kaj.images.length === 0
-              text: root.kaj && root.kaj.loadingImages ? "Loading…" : "No images."
-              color: root.dim
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.body
-              textFormat: Text.PlainText
-            }
+          ViewSection {
+            forView: "images"
+            loading: root.kaj && root.kaj.loadingImages
+            empty: root.kaj && root.kaj.images.length === 0
+            emptyText: "No images."
 
             Repeater {
               model: root.view === "images" && root.kaj
@@ -1117,20 +1135,11 @@ Panel {
 
           // ---- Volumes -----------------------------------------------------
 
-          Column {
-            width: parent.width
-            spacing: Style.space(8)
-            visible: root.view === "volumes" && root.reachable
-
-            Text {
-              width: parent.width
-              visible: root.kaj && root.kaj.volumes.length === 0
-              text: root.kaj && root.kaj.loadingVolumes ? "Loading…" : "No volumes."
-              color: root.dim
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.body
-              textFormat: Text.PlainText
-            }
+          ViewSection {
+            forView: "volumes"
+            loading: root.kaj && root.kaj.loadingVolumes
+            empty: root.kaj && root.kaj.volumes.length === 0
+            emptyText: "No volumes."
 
             Repeater {
               model: root.view === "volumes" && root.kaj
@@ -1188,20 +1197,11 @@ Panel {
 
           // ---- Networks ----------------------------------------------------
 
-          Column {
-            width: parent.width
-            spacing: Style.space(8)
-            visible: root.view === "networks" && root.reachable
-
-            Text {
-              width: parent.width
-              visible: root.kaj && root.kaj.networks.length === 0
-              text: root.kaj && root.kaj.loadingNetworks ? "Loading…" : "No networks."
-              color: root.dim
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.body
-              textFormat: Text.PlainText
-            }
+          ViewSection {
+            forView: "networks"
+            loading: root.kaj && root.kaj.loadingNetworks
+            empty: root.kaj && root.kaj.networks.length === 0
+            emptyText: "No networks."
 
             Repeater {
               model: root.view === "networks" && root.kaj
