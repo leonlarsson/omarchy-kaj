@@ -697,3 +697,15 @@ test("parseIds accepts only what a docker id can be", () => {
   assert.deepEqual(plain(model.parseIds("e30a359770d8\nrm -rf /\n0123456789ab\n")),
     ["e30a359770d8", "0123456789ab"]);
 });
+
+test("scrolling stops at both edges", () => {
+  // Room to move: one step down.
+  assert.equal(model.scrollTarget(0, 1, 46, 1000, 400), 46);
+  // Never above the top, however hard you press.
+  assert.equal(model.scrollTarget(0, -1, 46, 1000, 400), 0);
+  // Never past the last row: 1000 of content in a 400 viewport bottoms out
+  // at 600, not at whatever the step would have reached.
+  assert.equal(model.scrollTarget(580, 1, 46, 1000, 400), 600);
+  // Content shorter than the viewport cannot scroll at all.
+  assert.equal(model.scrollTarget(0, 1, 46, 200, 400), 0);
+});

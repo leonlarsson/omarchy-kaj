@@ -55,9 +55,25 @@ Panel {
     searchActive = false
     keyCatcher.forceActiveFocus()
     if (kaj) {
-      if (next === "images") kaj.loadImages()
-      else if (next === "disk") kaj.loadDisk()
+      loadFor(next)
     }
+  }
+
+  // The refresh button means "this view, again": containers stream themselves,
+  // but every other view is a snapshot taken when it was opened.
+  function loadFor(next) {
+    if (!kaj) return
+    if (next === "images") kaj.loadImages()
+    else if (next === "volumes") kaj.loadVolumes()
+    else if (next === "networks") kaj.loadNetworks()
+    else if (next === "disk") kaj.loadDisk()
+  }
+
+  // A row's worth per press, clamped: far enough to feel like progress, near
+  // enough that nothing scrolls past unread.
+  function scrollBy(delta) {
+    panelFlick.contentY = Model.scrollTarget(panelFlick.contentY, delta,
+      Style.space(46), panelFlick.contentHeight, panelFlick.height)
   }
 
   function stepView(delta) {
@@ -236,6 +252,9 @@ Panel {
     if (Model.isSearchKey(text)) { openSearch(); return }
     if (text === "?") { helpOpen = !helpOpen; return }
     if (text === "e") { toggleExpanded(cursorContainer); return }
+    // The status filter is a property of the container list, so it gets a key
+    // that only means something there.
+    if (text === "f") { if (view === "containers") stepFilter(1); return }
     var container = cursorContainer
     if (!container) return
     var action = Model.intendedAction(text, container)
@@ -396,13 +415,18 @@ Panel {
       }
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) {
-        if (dy !== 0) root.moveCursorBy(dy)
-        else if (dx !== 0) {
-          // Left/right steps whatever the current view offers: status filters
-          // in the container list, and the views themselves elsewhere.
-          if (root.view === "containers") root.stepFilter(dx)
-          else root.stepView(dx)
-        }
+        // Left/right always steps the view. It used to step the status filter
+        // in the container list and the view everywhere else, which read as
+        // clever and meant a keyboard user could never leave the container
+        // list at all: the only key that changed views did something else on
+        // the view they started in. The filter got its own key instead.
+        if (dx !== 0) { root.stepView(dx); return }
+        if (dy === 0) return
+        // Down/up moves the cursor where there is something to select, and
+        // scrolls where there is not. Volumes and Networks have no actions,
+        // so a selected row there would be a highlight that does nothing.
+        if (root.view === "containers") root.moveCursorBy(dy)
+        else root.scrollBy(dy)
       }
       onActivateRequested: root.activateCursor()
       onDeleteRequested: root.removeCursor()

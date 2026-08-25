@@ -545,6 +545,16 @@ function groupStats(containers, project) {
 
 // Clamps rather than wraps. Wrapping a short list makes j feel like it did
 // nothing; stopping at the end says "that is all of them".
+// Where a scroll lands. Kept here rather than inline in the panel for the
+// same reason the cursor is: it is arithmetic with edges, and edges are what
+// gets it wrong.
+function scrollTarget(contentY, delta, step, contentHeight, viewportHeight) {
+  var max = Math.max(0, Number(contentHeight || 0) - Number(viewportHeight || 0))
+  var next = Number(contentY || 0) + Number(delta || 0) * Number(step || 0)
+  if (!isFinite(next)) return 0
+  return Math.max(0, Math.min(max, next))
+}
+
 function moveCursor(index, delta, length) {
   if (length <= 0) return -1
   var next = index < 0 ? (delta > 0 ? 0 : length - 1) : index + delta
@@ -585,8 +595,9 @@ function actionHotkey(action) {
 
 // Every binding the panel answers to, in the order it is worth learning them.
 var keyHelp = [
-  { keys: "j  k", what: "Move between containers" },
-  { keys: "h  l", what: "Switch status filter" },
+  { keys: "h  l", what: "Switch view" },
+  { keys: "j  k", what: "Move between containers, or scroll" },
+  { keys: "f", what: "Cycle status filter" },
   { keys: "Enter", what: "Start or stop" },
   { keys: "r", what: "Restart" },
   { keys: "o", what: "Logs in a terminal" },
@@ -595,7 +606,6 @@ var keyHelp = [
   { keys: "x", what: "Remove (asks first)" },
   { keys: "e", what: "Environment variables" },
   { keys: "Ctrl+F  /", what: "Search" },
-  { keys: "h  l", what: "Switch view (Containers, Images, Disk)" },
   { keys: "?", what: "This list" },
   { keys: "Esc", what: "Clear search, then close" }
 ]

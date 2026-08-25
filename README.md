@@ -25,8 +25,9 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Move between containers |
-| `h` / `l` | Switch status filter |
+| `h` / `l` | Switch view |
+| `j` / `k` | Move between containers, or scroll the other views |
+| `f` | Cycle the status filter |
 | `Enter` | Start or stop the selected container |
 | `r` | Restart |
 | `o` | Logs |
