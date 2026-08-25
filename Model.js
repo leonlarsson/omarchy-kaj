@@ -723,6 +723,7 @@ function composeConfirmText(project, running, total) {
 var settingsSchema = [
   { key: "readOnly", type: "bool", fallback: false, toggle: true },
   { key: "showResourceUsage", type: "bool", fallback: true, toggle: true },
+  { key: "showContainerCountInBar", type: "bool", fallback: true },
   { key: "notifyOnContainerExit", type: "bool", fallback: false, toggle: true },
   { key: "defaultContainerStatusFilter", type: "enum", fallback: "all", options: statusFilters },
   { key: "refreshIntervalSec", type: "int", fallback: 30, min: 5, max: 3600 },

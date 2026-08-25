@@ -74,6 +74,7 @@ boolean or number rather than a string.
 |---|---|---|
 | `readOnly` | `false` | Disable every action that changes a container. Status, stats, and logs still work. The lock in the panel header toggles it. |
 | `showResourceUsage` | `true` | Stream live CPU and memory. |
+| `showContainerCountInBar` | `true` | Show the running count next to the bar icon. |
 | `defaultContainerStatusFilter` | `all` | Status filter selected when the panel opens: `all`, `running`, `stopped`, or `problems`. |
 | `notifyOnContainerExit` | `false` | Notify when a container exits non-zero or is OOM-killed. The bell in the panel header toggles it. |
 | `refreshIntervalSec` | `30` | Reconcile interval. Kaj follows `docker events`, so this only bounds how long a missed event goes unnoticed. |

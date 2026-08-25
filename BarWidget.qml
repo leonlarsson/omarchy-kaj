@@ -66,10 +66,15 @@ BarWidget {
     // The count is part of the label, not a sibling. WidgetButton sizes itself from
     // its own text, so anything outside it would overlap the next widget.
     // A vertical bar has no room for the number.
-    text: {
-      if (root.vertical || root.degraded || root.runningCount <= 0) return "󰡨"
-      return "󰡨 " + root.runningCount
-    }
+    readonly property bool countShown: !root.vertical && !root.degraded
+      && root.runningCount > 0
+      && (!root.kaj || root.kaj.showContainerCountInBar)
+
+    text: countShown ? "󰡨 " + root.runningCount : "󰡨"
+
+    // The icon alone carries the widget, so it is drawn a little larger. Beside
+    // a number it would tower over it.
+    fontSize: countShown ? Style.font.body : Style.font.body * 1.25
 
     tooltipText: root.kaj ? root.kaj.summary : "Docker"
 

@@ -33,6 +33,7 @@ Item {
   // Types, defaults and limits all live in Model.settingsSchema.
   readonly property bool readOnly: Model.readSetting(settings, "readOnly")
   readonly property bool showResourceUsage: Model.readSetting(settings, "showResourceUsage")
+  readonly property bool showContainerCountInBar: Model.readSetting(settings, "showContainerCountInBar")
   readonly property bool notifyOnContainerExit: Model.readSetting(settings, "notifyOnContainerExit")
   readonly property string defaultContainerStatusFilter: Model.readSetting(settings, "defaultContainerStatusFilter")
   readonly property int refreshIntervalSec: Model.readSetting(settings, "refreshIntervalSec")

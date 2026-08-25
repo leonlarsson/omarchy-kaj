@@ -3,7 +3,7 @@
   "id": "mozzy.kaj",
   "name": "Kaj",
   "version": "0.1.0",
-  "author": "Leon San José Larsson",
+  "author": "Leon San Jos\u00e9 Larsson",
   "license": "MIT",
   "description": "Docker containers in the Omarchy bar: live status, stats, logs, and controls, grouped by Compose project.",
   "kinds": [
@@ -19,12 +19,17 @@
     "displayName": "Kaj",
     "description": "Docker containers grouped by Compose project, with live stats, logs, and start/stop/restart controls.",
     "category": "System",
-    "aliases": ["docker", "containers", "kaj"],
+    "aliases": [
+      "docker",
+      "containers",
+      "kaj"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
       "readOnly": false,
       "showResourceUsage": true,
+      "showContainerCountInBar": true,
       "defaultContainerStatusFilter": "all",
       "notifyOnContainerExit": false,
       "refreshIntervalSec": 30,
@@ -46,10 +51,22 @@
         "description": "Stream per-container resource usage. Turn off to leave one fewer long-running docker process attached to the daemon."
       },
       {
+        "key": "showContainerCountInBar",
+        "type": "boolean",
+        "label": "Show the container count in the bar",
+        "defaultValue": true,
+        "description": "Show how many containers are running next to the icon. Turn off for the icon alone."
+      },
+      {
         "key": "defaultContainerStatusFilter",
         "type": "enum",
         "label": "Container status filter on open",
-        "options": ["all", "running", "stopped", "problems"],
+        "options": [
+          "all",
+          "running",
+          "stopped",
+          "problems"
+        ],
         "defaultValue": "all",
         "description": "Which status filter is selected each time the panel opens. Problems covers unhealthy, crashed, OOM-killed, and restart-looping containers."
       },
