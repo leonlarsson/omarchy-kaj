@@ -60,7 +60,8 @@ run() {
 # same but compose start refuses them, so group actions could not be tested.
 project() {
   local name="$1"
-  docker compose --project-name "$name" --file "$HERE/fixtures/$name.yaml" up --detach >/dev/null 2>&1
+  docker compose --project-name "$name" --file "$HERE/fixtures/$name.yaml" up --detach >/dev/null \
+    || die "compose up failed for $name"
 }
 
 # For the rendering fixtures only: text compose would never accept as a project

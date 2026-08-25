@@ -767,3 +767,24 @@ test("manifest defaults match the settings table", () => {
     assert.equal(entry.defaultValue, spec.fallback, `${spec.key} schema default`);
   }
 });
+
+test("group actions are offered only for real compose projects", () => {
+  const real = model.normalizeContainer({
+    Id: "a".repeat(12), Name: "/shop-api-1", State: { Status: "running", Running: true },
+    Labels: {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.project.config_files": "/srv/shop/compose.yaml"
+    }
+  });
+  // Labels applied by hand: it renders as a project, but compose has nothing
+  // to act on and answers "no container found".
+  const faked = model.normalizeContainer({
+    Id: "b".repeat(12), Name: "/hand", State: { Status: "running", Running: true },
+    Labels: { "com.docker.compose.project": "pretend" }
+  });
+  assert.equal(real.composeManaged, true);
+  assert.equal(faked.composeManaged, false);
+  assert.equal(model.isComposeProject([real, faked], "shop"), true);
+  assert.equal(model.isComposeProject([real, faked], "pretend"), false);
+  assert.equal(model.isComposeProject([], "shop"), false);
+});

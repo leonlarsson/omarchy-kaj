@@ -856,6 +856,8 @@ Panel {
                 readonly property var project: modelData.project
                 readonly property bool standalone: modelData.standalone
                 readonly property var stats: Model.groupStats(root.allContainers, modelData.project)
+                readonly property bool composeManaged: !modelData.standalone
+                  && Model.isComposeProject(root.allContainers, modelData.project)
                 readonly property string busyVerb: root.kaj && !modelData.standalone
                   ? root.kaj.busyAction(root.kaj.composeBusyKey(modelData.project)) : ""
 
@@ -864,24 +866,47 @@ Panel {
                   id: groupHover
                 }
 
-                PanelSectionHeader {
+                // The name, the state, and how many are up are three different
+                // facts, so they are three elements rather than one string in
+                // one colour. A red project used to turn its own name red,
+                // which said "this name is wrong" rather than "something in
+                // here is down".
+                Row {
                   id: groupHeader
                   anchors.left: parent.left
                   anchors.right: composeRow.left
                   anchors.rightMargin: Style.space(8)
                   anchors.verticalCenter: parent.verticalCenter
-                  // Compose project name, or a label for containers that belong to no project.
-                  text: groupBar.standalone
-                    ? "CONTAINERS"
-                    : (groupBar.project + "  ·  "
-                       + (groupBar.busyVerb !== ""
-                          ? Model.composeBusyLabel(groupBar.busyVerb)
-                          : groupBar.stats.running + "/" + groupBar.stats.total))
-                  foreground: groupBar.busyVerb !== ""
-                    ? Color.accent
-                    : (groupBar.stats.severity === "error" ? Color.urgent : root.contentForeground)
-                  fontFamily: root.contentFontFamily
-                  elide: Text.ElideRight
+                  spacing: Style.space(6)
+
+                  Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: groupBar.stats.severity !== "ok"
+                    width: Style.space(5)
+                    height: width
+                    radius: width / 2
+                    color: groupBar.stats.severity === "error" ? Color.urgent : Color.accent
+                  }
+
+                  PanelSectionHeader {
+                    text: groupBar.standalone ? "CONTAINERS" : groupBar.project
+                    foreground: root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    elide: Text.ElideRight
+                    width: Math.min(implicitWidth, groupHeader.width - Style.space(60))
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !groupBar.standalone
+                    text: groupBar.busyVerb !== ""
+                      ? Model.composeBusyLabel(groupBar.busyVerb)
+                      : groupBar.stats.running + " of " + groupBar.stats.total
+                    color: groupBar.busyVerb !== "" ? Color.accent : root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    textFormat: Text.PlainText
+                  }
                 }
 
                 // Whole-project actions run through docker compose, which owns the network and
@@ -891,34 +916,61 @@ Panel {
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(2)
-                  visible: !groupBar.standalone && !root.readOnly
+                  // Hidden unless compose would actually act on this project.
+                  // A container can carry the project label by hand; offering
+                  // buttons that always fail is worse than offering none.
+                  visible: !groupBar.standalone && !root.readOnly && groupBar.composeManaged
                   opacity: groupHover.hovered || groupBar.busyVerb !== "" ? 1 : 0
                   enabled: groupHover.hovered || groupBar.busyVerb !== ""
             
                   Repeater {
-                    model: ["start", "stop", "restart", "down"]
+                    model: ["start", "stop", "restart"]
 
                     PanelActionButton {
                       required property string modelData
 
-                      readonly property bool destructive: modelData === "down"
                       iconText: {
                         switch (modelData) {
                           case "start": return "󰐊"
                           case "stop": return "󰓛"
-                          case "restart": return "󰑐"
-                          default: return "󰹩"
+                          default: return "󰑐"
                         }
                       }
-                      tooltipText: "docker compose " + modelData
+                      tooltipText: {
+                        switch (modelData) {
+                          case "start": return "Start the whole project"
+                          case "stop": return "Stop the whole project"
+                          default: return "Restart the whole project"
+                        }
+                      }
                       enabled: groupBar.busyVerb === ""
                       opacity: enabled ? 1.0 : 0.35
-                      foreground: destructive ? Color.urgent : root.dim
-                      hoverColor: destructive ? Color.urgent : Color.accent
+                      foreground: root.dim
+                      hoverColor: Color.accent
                       fontFamily: root.contentFontFamily
                       fontSize: Style.font.caption
                       onClicked: root.requestCompose(groupBar.project, modelData, groupBar.stats)
                     }
+                  }
+
+                  // A gap, then the one verb that removes things. Four
+                  // identical targets in a row invite a mis-click on the only
+                  // one that cannot be taken back.
+                  Item {
+                    width: Style.space(8)
+                    height: 1
+                  }
+
+                  PanelActionButton {
+                    iconText: "󰜮"
+                    tooltipText: "Remove the project's containers (asks first)"
+                    enabled: groupBar.busyVerb === ""
+                    opacity: enabled ? 1.0 : 0.35
+                    foreground: Color.urgent
+                    hoverColor: Color.urgent
+                    fontFamily: root.contentFontFamily
+                    fontSize: Style.font.caption
+                    onClicked: root.requestCompose(groupBar.project, "down", groupBar.stats)
                   }
                 }
               }
@@ -1289,8 +1341,15 @@ Panel {
       cancelText: "Cancel"
 
       onConfirmed: {
-        if (root.kaj && root.pendingContainer) {
-          root.kaj.runAction(root.pendingAction, root.pendingContainer)
+        // Both kinds of pending action end here. Only the container branch
+        // existed, so confirming a compose down closed the dialog and did
+        // nothing at all.
+        if (root.kaj) {
+          if (root.pendingCompose !== "") {
+            root.kaj.composeAction(root.pendingCompose, root.pendingAction)
+          } else if (root.pendingContainer) {
+            root.kaj.runAction(root.pendingAction, root.pendingContainer)
+          }
         }
         confirm.opened = false
         root.clearPending()

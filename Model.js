@@ -166,6 +166,10 @@ function normalizeContainer(raw) {
     finishedAt: parseTime(state.FinishedAt),
     createdAt: parseTime(raw.Created),
     project: sanitizeLine(labels["com.docker.compose.project"] || ""),
+    // Compose writes this itself. A container can carry the project label by
+    // hand, and then compose has no project to act on: it answers "no
+    // container found" and the group's buttons can never work.
+    composeManaged: str(labels["com.docker.compose.project.config_files"]) !== "",
     service: sanitizeLine(labels["com.docker.compose.service"] || ""),
     ports: normalizePorts(raw.Ports),
     // Names only. The full objects carry host paths and IPAM detail the UI never shows.
@@ -476,6 +480,15 @@ function groupsKey(groups) {
 }
 
 // Header numbers for one project, read live so a stable row list stays correct.
+// Whether compose itself would act on this project.
+function isComposeProject(containers, project) {
+  if (!containers || containers.length === undefined || !project) return false
+  for (var i = 0; i < containers.length; i++) {
+    if ((containers[i].project || "") === project && containers[i].composeManaged === true) return true
+  }
+  return false
+}
+
 function groupStats(containers, project) {
   var list = Array.isArray(containers) ? containers : []
   var mine = []
