@@ -127,15 +127,26 @@ Item {
         Text {
           width: envBlock.width - x
           text: shown ? modelData.value : modelData.masked
-          color: shown ? row.foreground : row.dim
+          // Dots on their own give no sign that they can be clicked, so
+          // hovering brings them to full strength, the same thing the pointer
+          // cursor says: this one is yours to open.
+          color: shown || valueMouse.containsMouse ? row.foreground : row.dim
           font.family: row.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
           textFormat: Text.PlainText
 
           MouseArea {
-            anchors.fill: parent
-            anchors.margins: -Style.space(2)
+            id: valueMouse
+            // Sized to the painted text, not to the row: the value Text
+            // stretches to the right edge so long values can elide, and
+            // filling it would light the dots up from half a row away.
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: -Style.space(2)
+            width: Math.min(parent.width, parent.contentWidth) + Style.space(4)
+            height: parent.height + Style.space(4)
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: row.revealToggled(modelData.key)
           }

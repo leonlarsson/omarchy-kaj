@@ -111,8 +111,7 @@ workload you care about.
 `Model.js` holds parsing, grouping, formatting, and policy as pure functions.
 `Service.qml` talks to the daemon. `BarWidget.qml` and `Panel.qml` render.
 
-Files under `~/.config/omarchy/plugins/` hot-reload on save. Bar widget
-instances are cached, so changes to `BarWidget.qml` need `omarchy restart shell`.
+Run `omarchy restart shell` to pick up edits.
 
 ## License
 
