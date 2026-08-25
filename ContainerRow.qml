@@ -15,7 +15,7 @@ Item {
   property double now: 0
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
-  property bool showStats: true
+  property bool showResourceUsage: true
   property bool readOnly: false
   // The verb running against this container, or empty when idle.
   property string busyVerb: ""
@@ -273,7 +273,7 @@ Item {
     id: statsColumn
     anchors.verticalCenter: layout.verticalCenter
     anchors.right: layout.right
-    visible: row.showStats && row.running && row.stats !== null
+    visible: row.showResourceUsage && row.running && row.stats !== null
     width: Style.space(62)
     spacing: Style.space(1)
     // Fades out as the actions fade in. They share one slot.

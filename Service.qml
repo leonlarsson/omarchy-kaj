@@ -32,9 +32,9 @@ Item {
 
   // Types, defaults and limits all live in Model.settingsSchema.
   readonly property bool readOnly: Model.readSetting(settings, "readOnly")
-  readonly property bool showStats: Model.readSetting(settings, "showStats")
-  readonly property bool notifyOnExit: Model.readSetting(settings, "notifyOnExit")
-  readonly property string defaultFilter: Model.readSetting(settings, "defaultFilter")
+  readonly property bool showResourceUsage: Model.readSetting(settings, "showResourceUsage")
+  readonly property bool notifyOnContainerExit: Model.readSetting(settings, "notifyOnContainerExit")
+  readonly property string defaultContainerStatusFilter: Model.readSetting(settings, "defaultContainerStatusFilter")
   readonly property int refreshIntervalSec: Model.readSetting(settings, "refreshIntervalSec")
   readonly property int logLines: Model.readSetting(settings, "logLines")
   readonly property string summary: dockerInstalled
@@ -546,7 +546,7 @@ Item {
   }
 
   function syncStatsStream() {
-    var want = daemonReachable && showStats
+    var want = daemonReachable && showResourceUsage
     if (want && !statsProcess.running) {
       statsProcess.command = ["docker", "stats", "--format", "{{json .}}"]
       statsProcess.running = true
@@ -556,7 +556,7 @@ Item {
     }
   }
 
-  onShowStatsChanged: syncStatsStream()
+  onShowResourceUsageChanged: syncStatsStream()
 
   Process {
     id: eventsProcess
@@ -593,8 +593,8 @@ Item {
       var event = events[i]
       if (!event || event.Type !== "container") continue
       var status = String(event.status || event.Action || "")
-      if (notifyOnExit && status === "die") announceExit(event)
-      if (notifyOnExit && status === "oom") announceOom(event)
+      if (notifyOnContainerExit && status === "die") announceExit(event)
+      if (notifyOnContainerExit && status === "oom") announceOom(event)
       // Any state change means re-read. refresh() coalesces the calls.
       refreshTimer.restart()
     }

@@ -742,14 +742,14 @@ test("settings fall back when the value is missing or wrong", () => {
   // omarchy bar set without --json writes the string "true".
   assert.equal(model.readSetting({ readOnly: "true" }, "readOnly"), true);
   assert.equal(model.readSetting({ readOnly: "yes" }, "readOnly"), false);
-  assert.equal(model.readSetting({ defaultFilter: "bogus" }, "defaultFilter"), "all");
-  assert.equal(model.readSetting({ defaultFilter: "problems" }, "defaultFilter"), "problems");
+  assert.equal(model.readSetting({ defaultContainerStatusFilter: "bogus" }, "defaultContainerStatusFilter"), "all");
+  assert.equal(model.readSetting({ defaultContainerStatusFilter: "problems" }, "defaultContainerStatusFilter"), "problems");
   assert.equal(model.readSetting({}, "nosuchkey"), undefined);
 });
 
 test("only toggles can be written from the panel", () => {
   assert.equal(model.isTogglable("readOnly"), true);
-  assert.equal(model.isTogglable("notifyOnExit"), true);
+  assert.equal(model.isTogglable("notifyOnContainerExit"), true);
   assert.equal(model.isTogglable("logLines"), false);
   assert.equal(model.isTogglable("--json"), false);
 });

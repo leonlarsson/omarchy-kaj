@@ -24,9 +24,9 @@
     "defaultSection": "right",
     "defaults": {
       "readOnly": false,
-      "showStats": true,
-      "defaultFilter": "all",
-      "notifyOnExit": false,
+      "showResourceUsage": true,
+      "defaultContainerStatusFilter": "all",
+      "notifyOnContainerExit": false,
       "refreshIntervalSec": 30,
       "logLines": 500
     },
@@ -39,24 +39,24 @@
         "description": "Show status, stats, and logs but disable every action that changes a container. Useful on machines where the Docker socket is shared or production-adjacent."
       },
       {
-        "key": "showStats",
+        "key": "showResourceUsage",
         "type": "boolean",
-        "label": "Live CPU and memory",
+        "label": "Show CPU and memory",
         "defaultValue": true,
         "description": "Stream per-container resource usage. Turn off to leave one fewer long-running docker process attached to the daemon."
       },
       {
-        "key": "defaultFilter",
+        "key": "defaultContainerStatusFilter",
         "type": "enum",
-        "label": "Filter when the panel opens",
+        "label": "Container status filter on open",
         "options": ["all", "running", "stopped", "problems"],
         "defaultValue": "all",
         "description": "Which status filter is selected each time the panel opens. Problems covers unhealthy, crashed, OOM-killed, and restart-looping containers."
       },
       {
-        "key": "notifyOnExit",
+        "key": "notifyOnContainerExit",
         "type": "boolean",
-        "label": "Notify on crash or OOM",
+        "label": "Notify when a container exits",
         "defaultValue": false,
         "description": "Send a desktop notification when a container exits non-zero or is killed for running out of memory."
       },

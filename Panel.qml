@@ -27,8 +27,8 @@ Panel {
   readonly property color dim: Util.alpha(contentForeground, 0.62)
 
   readonly property bool readOnly: kaj ? kaj.readOnly === true : false
-  readonly property bool notifyOnExit: kaj ? kaj.notifyOnExit === true : false
-  readonly property bool showStats: kaj ? kaj.showStats === true : true
+  readonly property bool notifyOnContainerExit: kaj ? kaj.notifyOnContainerExit === true : false
+  readonly property bool showResourceUsage: kaj ? kaj.showResourceUsage === true : true
   readonly property bool installed: kaj ? kaj.dockerInstalled === true : false
   readonly property bool reachable: kaj ? kaj.daemonReachable === true : false
   readonly property bool probing: kaj ? kaj.probing === true : true
@@ -322,7 +322,7 @@ Panel {
   onOpenedChanged: {
     if (opened) {
       view = "containers"
-      statusFilter = kaj ? kaj.defaultFilter : "all"
+      statusFilter = kaj ? kaj.defaultContainerStatusFilter : "all"
       keyCatcher.forceActiveFocus()
       query = ""
       searchField.text = ""
@@ -539,14 +539,14 @@ Panel {
           PanelActionButton {
             id: bellButton
             anchors.verticalCenter: parent.verticalCenter
-            iconText: root.notifyOnExit ? "󰂚" : "󰂛"
-            tooltipText: root.notifyOnExit
+            iconText: root.notifyOnContainerExit ? "󰂚" : "󰂛"
+            tooltipText: root.notifyOnContainerExit
               ? "Notifications are on. Click to stop them"
               : "Notifications are off. Click to be told when a container fails"
-            foreground: root.notifyOnExit ? Color.accent : root.contentForeground
+            foreground: root.notifyOnContainerExit ? Color.accent : root.contentForeground
             hoverColor: Color.accent
             fontFamily: root.contentFontFamily
-            onClicked: if (root.kaj) root.kaj.writeSetting("notifyOnExit", !root.notifyOnExit)
+            onClicked: if (root.kaj) root.kaj.writeSetting("notifyOnContainerExit", !root.notifyOnContainerExit)
           }
 
           PanelActionButton {
@@ -914,7 +914,7 @@ Panel {
                   onRevealToggled: function (key) { root.toggleReveal(key) }
                   foreground: root.contentForeground
                   fontFamily: root.contentFontFamily
-                  showStats: root.showStats
+                  showResourceUsage: root.showResourceUsage
                   readOnly: root.readOnly
                   busyVerb: root.kaj ? root.kaj.busyAction(modelData.id) : ""
                   hasCursor: root.cursorContainer

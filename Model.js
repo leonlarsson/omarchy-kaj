@@ -722,9 +722,9 @@ function composeConfirmText(project, running, total) {
 // toggle marks the settings the panel is allowed to write.
 var settingsSchema = [
   { key: "readOnly", type: "bool", fallback: false, toggle: true },
-  { key: "showStats", type: "bool", fallback: true, toggle: true },
-  { key: "notifyOnExit", type: "bool", fallback: false, toggle: true },
-  { key: "defaultFilter", type: "enum", fallback: "all", options: statusFilters },
+  { key: "showResourceUsage", type: "bool", fallback: true, toggle: true },
+  { key: "notifyOnContainerExit", type: "bool", fallback: false, toggle: true },
+  { key: "defaultContainerStatusFilter", type: "enum", fallback: "all", options: statusFilters },
   { key: "refreshIntervalSec", type: "int", fallback: 30, min: 5, max: 3600 },
   { key: "logLines", type: "int", fallback: 500, min: 50, max: 5000 }
 ]
