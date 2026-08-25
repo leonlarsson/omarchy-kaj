@@ -672,9 +672,10 @@ function containerSeverity(container) {
   if (container.dead) return "error"
   if (container.health === "unhealthy") return "error"
   if (!container.running && container.exitCode !== 0) return "error"
+  // A restart loop is worth attention. Paused and starting are not: one is
+  // deliberate and the other is transient, and both already read as themselves
+  // in the row. Problems is meant to be the list you act on.
   if (container.restarting) return "warn"
-  if (container.paused) return "warn"
-  if (container.health === "starting") return "warn"
   return "ok"
 }
 

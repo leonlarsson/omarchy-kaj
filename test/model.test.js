@@ -196,9 +196,11 @@ test("severity escalates for the states worth interrupting someone about", () =>
   assert.equal(model.containerSeverity(container({ health: "unhealthy" })), "error");
   assert.equal(model.containerSeverity(container({ running: false, exitCode: 1 })), "error");
   assert.equal(model.containerSeverity(container({ restarting: true })), "warn");
-  assert.equal(model.containerSeverity(container({ health: "starting" })), "warn");
-  // A clean stop is not a problem.
+  // A clean stop is not a problem, and neither is a state someone chose or a
+  // healthcheck that has not finished its first run.
   assert.equal(model.containerSeverity(container({ running: false, exitCode: 0 })), "ok");
+  assert.equal(model.containerSeverity(container({ paused: true, running: true })), "ok");
+  assert.equal(model.containerSeverity(container({ health: "starting" })), "ok");
 });
 
 test("rollup reports the worst container in the set", () => {
@@ -787,4 +789,16 @@ test("group actions are offered only for real compose projects", () => {
   assert.equal(model.isComposeProject([real, faked], "shop"), true);
   assert.equal(model.isComposeProject([real, faked], "pretend"), false);
   assert.equal(model.isComposeProject([], "shop"), false);
+});
+
+test("the problems filter lists only what needs acting on", () => {
+  const list = [
+    container({ id: "a", name: "ok", running: true }),
+    container({ id: "b", name: "paused", running: true, paused: true }),
+    container({ id: "c", name: "starting", running: true, health: "starting" }),
+    container({ id: "d", name: "crashed", running: false, exitCode: 3 }),
+    container({ id: "e", name: "looping", running: true, restarting: true })
+  ];
+  const problems = model.filterContainers(list, "", "problems").map((c) => c.name);
+  assert.deepEqual(plain(problems), ["crashed", "looping"]);
 });
