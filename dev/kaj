@@ -155,6 +155,49 @@ cmd_clean() {
     echo "removing ${#networks[@]} seeded network(s)"
     docker network rm "${networks[@]}" >/dev/null
   fi
+  for tag in "${DEMO_TAGS[@]}"; do demo_untag "$tag"; done
+}
+
+# Tags busybox under a familiar name so the Images view reads like a real
+# machine. Never overwrites a tag that already exists: a real postgres:16 on
+# this host is left exactly where it is.
+DEMO_TAGS=(acme/web:1.4.2 acme/api:1.4.2 acme/worker:1.4.2 postgres:16 redis:7-alpine)
+
+demo_tag() {
+  local tag="$1"
+  docker image inspect "$tag" >/dev/null 2>&1 && return
+  docker tag "$IMAGE" "$tag"
+}
+
+demo_untag() {
+  local tag="$1" id busybox_id
+  id=$(docker image inspect "$tag" --format '{{.Id}}' 2>/dev/null) || return 0
+  busybox_id=$(docker image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null) || return 0
+  # Only ever removes the alias we made: a real image of that name is not ours.
+  [[ $id == "$busybox_id" ]] || return 0
+  docker rmi "$tag" >/dev/null 2>&1 || true
+}
+
+# A small, healthy, believable stack. The seed scene is for finding bugs; this
+# one is for showing the plugin.
+cmd_demo() {
+  require_docker; require_image
+  cmd_clean >/dev/null
+  echo "seeding demo..."
+
+  for tag in "${DEMO_TAGS[@]}"; do demo_tag "$tag"; done
+
+  project acme
+
+  # Plain names: the kaj-dev- prefix is for the test scene, and it would read
+  # as staged in a screenshot.
+  docker run -d --label "$LABEL" --name mailer --no-healthcheck \
+    "$IMAGE" sh -c 'exit 0' >/dev/null
+  docker run -d --label "$LABEL" --name grafana --no-healthcheck \
+    -p 3000:3000 "$IMAGE" sleep 86400 >/dev/null
+
+  echo
+  cmd_status
 }
 
 cmd_status() {
@@ -231,6 +274,7 @@ Development CLI for Kaj. Only ever touches containers labelled $LABEL.
 Usage: dev/kaj <command> [container]
 
   seed              create a scene covering every state the panel renders
+  demo              create a small realistic stack, for screenshots
   clean             remove every seeded container
   status            list seeded containers
 
@@ -249,6 +293,7 @@ EOF
 
 case "${1:-}" in
   seed) cmd_seed ;;
+  demo) cmd_demo ;;
   clean) cmd_clean ;;
   status|ls) cmd_status ;;
   crash) cmd_crash "${2:-}" "${3:-3}" ;;

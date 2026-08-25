@@ -1,0 +1,38 @@
+# A believable small stack, for screenshots. Every service is busybox under a
+# familiar tag: the panel shows names, ports and state, and pulling real images
+# for a product photo would cost hundreds of megabytes to change nothing.
+services:
+  web:
+    image: acme/web:1.4.2
+    command: sleep 86400
+    ports: ["8080:80"]
+    labels: { kaj.dev: "1" }
+  api:
+    image: acme/api:1.4.2
+    command: sleep 86400
+    ports: ["9000:9000"]
+    mem_limit: 512m
+    labels: { kaj.dev: "1" }
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 10s
+  worker:
+    image: acme/worker:1.4.2
+    command: sleep 86400
+    mem_limit: 256m
+    labels: { kaj.dev: "1" }
+  postgres:
+    image: postgres:16
+    command: sleep 86400
+    labels: { kaj.dev: "1" }
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 10s
+  redis:
+    image: redis:7-alpine
+    command: sleep 86400
+    labels: { kaj.dev: "1" }
+
+networks:
+  default:
+    labels: { kaj.dev: "1" }

@@ -118,6 +118,7 @@ npm test                    # pure logic, no QML or Docker needed
 omarchy plugin validate .
 
 dev/kaj seed                # containers covering every state the panel renders
+dev/kaj demo                # a small realistic stack, for screenshots
 dev/kaj status              # list them
 dev/kaj crash solo          # drive a state change and watch the panel react
 dev/kaj oom                 # a container that gets OOM-killed
@@ -125,7 +126,10 @@ dev/kaj unhealthy           # a container that fails its healthcheck
 dev/kaj clean               # remove them all
 ```
 
-`dev/kaj --help` lists everything. It labels what it creates `kaj.dev=1` and
+`dev/kaj --help` lists everything. `demo` tags busybox under familiar names so
+the container list reads like a real machine; it never overwrites a tag that
+already exists, and removes only the aliases it made. Every image is the same
+6 MB busybox underneath, so the Images view is not worth photographing. It labels what it creates `kaj.dev=1` and
 refuses to act on any container without that label, so it cannot touch a
 workload you care about.
 
