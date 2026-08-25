@@ -30,26 +30,16 @@ Item {
   property int totalCount: 0
   property string lastError: ""
 
-  readonly property bool readOnly: setting("readOnly", false) === true
-  readonly property bool showStats: setting("showStats", true) === true
-  readonly property string defaultFilter: String(setting("defaultFilter", "all"))
-  readonly property bool notifyOnExit: setting("notifyOnExit", false) === true
-  readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 30, 5, 3600)
-  readonly property int logLines: intSetting("logLines", 500, 50, 5000)
+  // Types, defaults and limits all live in Model.settingsSchema.
+  readonly property bool readOnly: Model.readSetting(settings, "readOnly")
+  readonly property bool showStats: Model.readSetting(settings, "showStats")
+  readonly property bool notifyOnExit: Model.readSetting(settings, "notifyOnExit")
+  readonly property string defaultFilter: Model.readSetting(settings, "defaultFilter")
+  readonly property int refreshIntervalSec: Model.readSetting(settings, "refreshIntervalSec")
+  readonly property int logLines: Model.readSetting(settings, "logLines")
   readonly property string summary: dockerInstalled
     ? (daemonReachable ? Model.barSummary(containers) : "Docker daemon not running")
     : "Docker not installed"
-
-  function setting(name, fallback) {
-    var value = settings ? settings[name] : undefined
-    return value === undefined || value === null ? fallback : value
-  }
-
-  function intSetting(name, fallback, min, max) {
-    var n = parseInt(String(setting(name, fallback)), 10)
-    if (!isFinite(n)) n = fallback
-    return Math.max(min, Math.min(max, n))
-  }
 
   function containerById(id) {
     for (var i = 0; i < containers.length; i++) {
@@ -416,12 +406,9 @@ Item {
   }
 
   // Toggling a setting writes the setting, so the panel holds no second copy.
-  // --json keeps the value a real boolean. The key is checked against a list,
-  // so only these two can ever reach the command line.
-  readonly property var writableSettings: ["readOnly", "notifyOnExit"]
-
+  // --json keeps the value a real boolean.
   function writeSetting(key, next) {
-    if (writableSettings.indexOf(key) === -1) return
+    if (!Model.isTogglable(key)) return
     Quickshell.execDetached([
       "omarchy", "bar", "set", "mozzy.kaj", key,
       next === true ? "true" : "false", "--json"

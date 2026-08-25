@@ -734,3 +734,36 @@ test("notification text cannot carry markup", () => {
   assert.equal(model.notificationText("a & b"), "a &amp; b");
   assert.equal(model.notificationText("api"), "api");
 });
+
+test("settings fall back when the value is missing or wrong", () => {
+  assert.equal(model.readSetting({}, "logLines"), 500);
+  assert.equal(model.readSetting({ logLines: "99999" }, "logLines"), 5000, "clamped");
+  assert.equal(model.readSetting({ logLines: "nonsense" }, "logLines"), 500);
+  // omarchy bar set without --json writes the string "true".
+  assert.equal(model.readSetting({ readOnly: "true" }, "readOnly"), true);
+  assert.equal(model.readSetting({ readOnly: "yes" }, "readOnly"), false);
+  assert.equal(model.readSetting({ defaultFilter: "bogus" }, "defaultFilter"), "all");
+  assert.equal(model.readSetting({ defaultFilter: "problems" }, "defaultFilter"), "problems");
+  assert.equal(model.readSetting({}, "nosuchkey"), undefined);
+});
+
+test("only toggles can be written from the panel", () => {
+  assert.equal(model.isTogglable("readOnly"), true);
+  assert.equal(model.isTogglable("notifyOnExit"), true);
+  assert.equal(model.isTogglable("logLines"), false);
+  assert.equal(model.isTogglable("--json"), false);
+});
+
+test("manifest defaults match the settings table", () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(new URL("../manifest.json", `file://${__dirname}/`), "utf8"));
+  const defaults = manifest.barWidget.defaults;
+  const schema = manifest.barWidget.schema;
+  assert.equal(Object.keys(defaults).length, model.settingsSchema.length);
+  for (const spec of model.settingsSchema) {
+    assert.equal(defaults[spec.key], spec.fallback, `${spec.key} default`);
+    const entry = schema.find((row) => row.key === spec.key);
+    assert.ok(entry, `${spec.key} is described in the schema`);
+    assert.equal(entry.defaultValue, spec.fallback, `${spec.key} schema default`);
+  }
+});

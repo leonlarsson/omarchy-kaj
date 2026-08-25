@@ -714,6 +714,51 @@ function composeConfirmText(project, running, total) {
 }
 
 // ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+// One table for every setting: the type, the default, and the limits.
+// Service.qml reads it, and a test checks manifest.json still agrees with it.
+// toggle marks the settings the panel is allowed to write.
+var settingsSchema = [
+  { key: "readOnly", type: "bool", fallback: false, toggle: true },
+  { key: "showStats", type: "bool", fallback: true, toggle: true },
+  { key: "notifyOnExit", type: "bool", fallback: false, toggle: true },
+  { key: "defaultFilter", type: "enum", fallback: "all", options: statusFilters },
+  { key: "refreshIntervalSec", type: "int", fallback: 30, min: 5, max: 3600 },
+  { key: "logLines", type: "int", fallback: 500, min: 50, max: 5000 }
+]
+
+function settingSpec(key) {
+  for (var i = 0; i < settingsSchema.length; i++) {
+    if (settingsSchema[i].key === key) return settingsSchema[i]
+  }
+  return null
+}
+
+// The value to use: what the user set, or the default when it is missing or
+// makes no sense. A bad value is never passed on.
+function readSetting(settings, key) {
+  var spec = settingSpec(key)
+  if (!spec) return undefined
+  var value = settings ? settings[key] : undefined
+  if (value === undefined || value === null) return spec.fallback
+  if (spec.type === "bool") return value === true || value === "true"
+  if (spec.type === "int") {
+    var n = parseInt(str(value), 10)
+    if (!isFinite(n)) return spec.fallback
+    return Math.max(spec.min, Math.min(spec.max, n))
+  }
+  return spec.options.indexOf(str(value)) === -1 ? spec.fallback : str(value)
+}
+
+// Only these can be written from the panel, so no other key reaches a command.
+function isTogglable(key) {
+  var spec = settingSpec(key)
+  return spec !== null && spec.toggle === true
+}
+
+// ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
 
