@@ -3,9 +3,9 @@
   "id": "mozzy.kaj",
   "name": "Kaj",
   "version": "1.0.0",
-  "author": "Leon San Jos\u00e9 Larsson",
+  "author": "Leon San José Larsson",
   "license": "MIT",
-  "description": "Docker containers in the Omarchy bar: live status, stats, logs, and controls, grouped by Compose project.",
+  "description": "Docker containers in the Omarchy bar: live status, stats, logs, and controls.",
   "kinds": [
     "service",
     "bar-widget"
@@ -17,7 +17,7 @@
   },
   "barWidget": {
     "displayName": "Kaj",
-    "description": "Docker containers grouped by Compose project, with live stats, logs, and start/stop/restart controls.",
+    "description": "Docker containers with live stats, logs, and start/stop/restart controls.",
     "category": "System",
     "aliases": [
       "docker",
