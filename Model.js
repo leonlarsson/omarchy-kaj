@@ -63,7 +63,7 @@ function maskValue(value) {
 function envEntries(list) {
   var out = []
   if (!list || list.length === undefined) return out
-  for (var i = 0; i < list.length; i++) {
+  for (var i = 0; i < list.length && i < maxNestedItems; i++) {
     var parts = splitEnvEntry(list[i])
     out.push({ key: parts.key, value: parts.value, masked: maskValue(parts.value) })
   }
@@ -98,6 +98,17 @@ var maxStatsEntries = 500
 // this for a whole window is not something Kaj keeps up with.
 var maxEventsPerWindow = 200
 var eventWindowMs = 1000
+// Stats records are as frequent as the endpoint chooses to send them.
+var maxStatsPerWindow = 200
+// A nested value inside one container: environment entries, ports, mounts,
+// networks. A snapshot can sit under the byte budget and still carry a single
+// container with a million ports, which becomes a million QML delegates.
+var maxNestedItems = 100
+// Ids remembered for notification cooldowns.
+var maxNotifiedEntries = 200
+// A long-lived stream's collector keeps everything it has read, so the process
+// is recycled once its buffer reaches this size.
+var maxStreamBufferBytes = 1024 * 1024
 
 function overBudget(text, limit) {
   return str(text).length > (limit === undefined ? maxOutputBytes : limit)
@@ -229,6 +240,7 @@ function networkNames(map) {
   var out = []
   if (!map || typeof map !== "object") return out
   for (var key in map) {
+    if (out.length >= maxNestedItems) break
     var name = sanitizeLine(key)
     if (name !== "" && out.indexOf(name) === -1) out.push(name)
   }
@@ -263,7 +275,7 @@ function normalizePorts(ports) {
   var out = []
   if (!ports || typeof ports !== "object") return out
   var keys = Object.keys(ports).sort()
-  for (var i = 0; i < keys.length; i++) {
+  for (var i = 0; i < keys.length && out.length < maxNestedItems; i++) {
     var bindings = ports[keys[i]]
     var parts = String(keys[i]).split("/")
     var containerPort = parseInt(parts[0], 10)
@@ -274,7 +286,7 @@ function normalizePorts(ports) {
     }
     // Collapse the v4/v6 pair Docker reports for one -p flag.
     var seen = {}
-    for (var j = 0; j < bindings.length; j++) {
+    for (var j = 0; j < bindings.length && out.length < maxNestedItems; j++) {
       var hostPort = parseInt(bindings[j] && bindings[j].HostPort, 10)
       if (!isFinite(hostPort) || seen[hostPort]) continue
       seen[hostPort] = true
@@ -403,6 +415,48 @@ function mergeStats(existing, raw, knownIds) {
   if (!stat) return out
   if (out[stat.shortId] === undefined && Object.keys(out).length >= maxStatsEntries) return out
   out[stat.shortId] = stat
+  return out
+}
+
+// Splits a growing stream buffer into whole records and the tail that is not
+// finished yet. The caller keeps the tail and the byte count, which is what
+// makes an unterminated record measurable: it simply never becomes a record.
+function takeRecords(buffer, limit) {
+  var cap = limit === undefined ? maxStreamLineBytes : limit
+  var text = str(buffer)
+  var out = { records: [], rest: text, overflow: false }
+  var cut = text.lastIndexOf("\n")
+  if (cut < 0) {
+    // No complete record yet. A tail past the cap is a record that will never
+    // arrive, so the caller is told to drop the stream rather than hold it.
+    out.overflow = text.length > cap
+    return out
+  }
+  var whole = text.slice(0, cut)
+  out.rest = text.slice(cut + 1)
+  out.overflow = out.rest.length > cap
+  var lines = whole.split("\n")
+  for (var i = 0; i < lines.length && out.records.length < maxRows; i++) {
+    var line = lines[i]
+    if (line === "" || line.length > cap) continue
+    out.records.push(line)
+  }
+  return out
+}
+
+// Keeps the newest entries of a timestamp map and drops the rest, so a map fed
+// by ids the daemon invents cannot grow without end.
+function pruneTimestamps(map, limit) {
+  var cap = limit === undefined ? maxNotifiedEntries : limit
+  var out = {}
+  if (!map || typeof map !== "object") return out
+  var keys = Object.keys(map)
+  if (keys.length <= cap) {
+    for (var i = 0; i < keys.length; i++) out[keys[i]] = map[keys[i]]
+    return out
+  }
+  keys.sort(function (a, b) { return Number(map[b] || 0) - Number(map[a] || 0) })
+  for (var j = 0; j < cap; j++) out[keys[j]] = map[keys[j]]
   return out
 }
 

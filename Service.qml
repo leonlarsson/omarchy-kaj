@@ -76,6 +76,7 @@ Item {
     for (var i = 0; i < _watched.length; i++) {
       var entry = _watched[i]
       if (entry.due > now) { next.push(entry); continue }
+      markRefused(entry.proc, true)
       entry.proc.running = false
       lastError = entry.what + " did not answer in time"
       errorFromAction = false
@@ -84,7 +85,20 @@ Item {
     if (next.length === 0) deadlineTimer.running = false
   }
 
+  property var _refused: ({})
+
+  function isRefused(proc) { return _refused[String(proc)] === true }
+
+  function markRefused(proc, refused) {
+    var next = ({})
+    for (var key in _refused) next[key] = _refused[key]
+    if (refused) next[String(proc)] = true
+    else delete next[String(proc)]
+    _refused = next
+  }
+
   function refuseOversized(proc, what) {
+    markRefused(proc, true)
     proc.running = false
     lastError = what + " returned more data than Kaj will read"
     errorFromAction = false
@@ -262,11 +276,13 @@ Item {
     id: imagesProcess
     running: false
     onExited: root.unwatch(imagesProcess)
+    onRunningChanged: if (running) root.markRefused(imagesProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(imagesProcess, "docker images")
       }
       onStreamFinished: {
+        if (root.isRefused(imagesProcess)) { root.loadingImages = false; return }
         root.images = Model.normalizeImages(Model.parseJsonLines(text))
         root.loadingImages = false
       }
@@ -277,11 +293,13 @@ Item {
     id: volumesProcess
     running: false
     onExited: root.unwatch(volumesProcess)
+    onRunningChanged: if (running) root.markRefused(volumesProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(volumesProcess, "docker system df")
       }
       onStreamFinished: {
+        if (root.isRefused(volumesProcess)) { root.loadingVolumes = false; return }
         root.volumes = Model.normalizeVolumes(Model.parseJson(text))
         root.loadingVolumes = false
       }
@@ -292,11 +310,15 @@ Item {
     id: networkIdsProcess
     running: false
     onExited: root.unwatch(networkIdsProcess)
+    onRunningChanged: if (running) root.markRefused(networkIdsProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(networkIdsProcess, "docker network ls")
       }
-      onStreamFinished: root.inspectNetworks(Model.parseIds(text))
+      onStreamFinished: {
+        if (root.isRefused(networkIdsProcess)) { root.loadingNetworks = false; return }
+        root.inspectNetworks(Model.parseIds(text))
+      }
     }
   }
 
@@ -304,11 +326,13 @@ Item {
     id: networksProcess
     running: false
     onExited: root.unwatch(networksProcess)
+    onRunningChanged: if (running) root.markRefused(networksProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(networksProcess, "docker network inspect")
       }
       onStreamFinished: {
+        if (root.isRefused(networksProcess)) { root.loadingNetworks = false; return }
         root.networks = Model.normalizeNetworks(Model.parseJson(text))
         root.loadingNetworks = false
       }
@@ -319,11 +343,15 @@ Item {
     id: diskProcess
     running: false
     onExited: root.unwatch(diskProcess)
+    onRunningChanged: if (running) root.markRefused(diskProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(diskProcess, "docker system df")
       }
-      onStreamFinished: root.disk = Model.normalizeDisk(Model.parseJsonLines(text))
+      onStreamFinished: {
+        if (root.isRefused(diskProcess)) return
+        root.disk = Model.normalizeDisk(Model.parseJsonLines(text))
+      }
     }
   }
 
@@ -366,6 +394,7 @@ Item {
         if (Model.overBudget(text)) root.refuseOversized(envProcess, "docker inspect")
       }
       onStreamFinished: {
+        if (root.isRefused(envProcess)) return
         if (envProcess.containerId !== root.wantedEnvId) return
         var rows = Model.parseJsonLines(text)
         var next = ({})
@@ -560,6 +589,7 @@ Item {
     id: whichProcess
     running: false
     onExited: root.unwatch(whichProcess)
+    onRunningChanged: if (running) root.markRefused(whichProcess, false)
     stdout: StdioCollector {
       onStreamFinished: {
         root.dockerInstalled = String(text || "").trim() !== ""
@@ -612,11 +642,13 @@ Item {
     id: idsProcess
     running: false
     onExited: root.unwatch(idsProcess)
+    onRunningChanged: if (running) root.markRefused(idsProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(idsProcess, "docker ps")
       }
       onStreamFinished: {
+        if (root.isRefused(idsProcess)) return
         var ids = String(text || "").split("\n").filter(function (line) {
           // Accept only valid container ids.
           return /^[0-9a-f]{12,64}$/.test(line.trim())
@@ -630,11 +662,13 @@ Item {
     id: inspectProcess
     running: false
     onExited: root.unwatch(inspectProcess)
+    onRunningChanged: if (running) root.markRefused(inspectProcess, false)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(inspectProcess, "docker inspect")
       }
       onStreamFinished: {
+        if (root.isRefused(inspectProcess)) return
         var rows = Model.parseJsonLines(text)
         for (var i = 0; i < rows.length && root._collected.length < Model.maxRows; i++) {
           root._collected.push(rows[i])
@@ -696,13 +730,23 @@ Item {
 
   Process {
     id: eventsProcess
+    property int consumed: 0
+    property string tail: ""
     running: false
-    // Streams are read line by line, so the guard is per line: an event or a
-    // stats record larger than the cap is dropped rather than parsed.
-    stdout: SplitParser {
-      onRead: function (line) {
-        if (Model.overBudget(line, Model.maxStreamLineBytes)) return
-        root.handleEvent(line)
+    onRunningChanged: if (running) { consumed = 0; tail = "" }
+    // Read through a collector rather than a line parser, because a collector's
+    // buffer can be measured. A record with no newline never reaches a line
+    // parser's callback, so its size is invisible: here it stays in the tail,
+    // and a tail past the cap drops the stream instead of holding it.
+    stdout: StdioCollector {
+      onDataChanged: {
+        var fresh = text.slice(eventsProcess.consumed)
+        eventsProcess.consumed = text.length
+        var taken = Model.takeRecords(eventsProcess.tail + fresh)
+        eventsProcess.tail = taken.rest
+        if (taken.overflow) { root.dropStream(eventsProcess, "docker events"); return }
+        for (var i = 0; i < taken.records.length; i++) root.handleEvent(taken.records[i])
+        if (text.length > Model.maxStreamBufferBytes) root.recycleStreams()
       }
     }
     onExited: function () {
@@ -718,13 +762,27 @@ Item {
     // The events stream re-probes the daemon when it dies, but stats can end on
     // its own, and nothing else would notice that the numbers had stopped.
     onExited: root.statsRestartTimer.restart()
-    stdout: SplitParser {
-      onRead: function (line) {
-        if (Model.overBudget(line, Model.maxStreamLineBytes)) return
-        var parsed = Model.parseJsonLines(line)
-        for (var i = 0; i < parsed.length; i++) {
-          root.statsById = Model.mergeStats(root.statsById, parsed[i], root.knownShortIds)
+    property int consumed: 0
+    property string tail: ""
+    onRunningChanged: if (running) { consumed = 0; tail = "" }
+    stdout: StdioCollector {
+      onDataChanged: {
+        var fresh = text.slice(statsProcess.consumed)
+        statsProcess.consumed = text.length
+        var taken = Model.takeRecords(statsProcess.tail + fresh)
+        statsProcess.tail = taken.rest
+        if (taken.overflow) { root.dropStream(statsProcess, "docker stats"); return }
+        for (var i = 0; i < taken.records.length; i++) {
+          // Stats records are rate limited too: a flood of short lines drove
+          // every callback and every binding behind it.
+          if (root._statsThisWindow >= Model.maxStatsPerWindow) break
+          root._statsThisWindow++
+          var parsed = Model.parseJsonLines(taken.records[i])
+          for (var j = 0; j < parsed.length; j++) {
+            root.statsById = Model.mergeStats(root.statsById, parsed[j], root.knownShortIds)
+          }
         }
+        if (text.length > Model.maxStreamBufferBytes) root.recycleStreams()
       }
     }
   }
@@ -733,6 +791,22 @@ Item {
   // the window is dropped: the reconcile timer still corrects the panel, so a
   // flood costs accuracy for a second rather than the shell's main thread.
   property int _eventsThisWindow: 0
+  property int _statsThisWindow: 0
+
+  // A stream whose buffer runs past the cap is stopped, not held. The
+  // reconnect path brings it back.
+  function dropStream(proc, what) {
+    proc.running = false
+    lastError = what + " sent a record larger than Kaj will read"
+    errorFromAction = false
+    reconnectTimer.restart()
+  }
+
+  function recycleStreams() {
+    eventsProcess.running = false
+    statsProcess.running = false
+    startStreams()
+  }
 
   function handleEvent(line) {
     if (_eventsThisWindow >= Model.maxEventsPerWindow) return
@@ -753,6 +827,7 @@ Item {
   property var _selfInitiated: ({})
 
   function markSelfInitiated(id) {
+    _selfInitiated = Model.pruneTimestamps(_selfInitiated)
     var next = ({})
     for (var key in _selfInitiated) next[key] = _selfInitiated[key]
     next[String(id)] = Date.now()
@@ -773,14 +848,23 @@ Item {
   property var _lastNotified: ({})
   readonly property int notifyCooldownMs: 60000
 
+  // Two ceilings, because the per-container cooldown alone does not bound a
+  // daemon inventing ids: each new id was a free notification and a permanent
+  // map entry. The map is pruned, and no more than a few notifications leave
+  // Kaj in any one window however many containers report.
+  readonly property int maxNotificationsPerWindow: 3
+  property int _notificationsThisWindow: 0
+
   function shouldNotify(id) {
+    if (_notificationsThisWindow >= maxNotificationsPerWindow) return false
     var key = String(id)
     var last = _lastNotified[key]
     if (last !== undefined && (Date.now() - last) < notifyCooldownMs) return false
     var next = ({})
     for (var existing in _lastNotified) next[existing] = _lastNotified[existing]
     next[key] = Date.now()
-    _lastNotified = next
+    _lastNotified = Model.pruneTimestamps(next)
+    _notificationsThisWindow++
     return true
   }
 
@@ -820,7 +904,11 @@ Item {
     interval: Model.eventWindowMs
     repeat: true
     running: root.daemonReachable
-    onTriggered: root._eventsThisWindow = 0
+    onTriggered: {
+      root._eventsThisWindow = 0
+      root._statsThisWindow = 0
+      root._notificationsThisWindow = 0
+    }
   }
 
   // A stream is read line by line, and a record with no newline never reaches
@@ -831,11 +919,7 @@ Item {
     interval: 600000
     repeat: true
     running: root.daemonReachable
-    onTriggered: {
-      eventsProcess.running = false
-      statsProcess.running = false
-      root.startStreams()
-    }
+    onTriggered: root.recycleStreams()
   }
 
   Timer {

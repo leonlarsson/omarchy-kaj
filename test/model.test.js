@@ -850,3 +850,41 @@ test("inspect runs in batches rather than one giant argv", () => {
   const batched = model.idBatches(flood).reduce((n, b) => n + b.length, 0);
   assert.equal(batched, model.maxRows);
 });
+
+test("stream records are split with the unfinished tail measured", () => {
+  const taken = model.takeRecords("one\ntwo\npart");
+  assert.deepEqual(plain(taken.records), ["one", "two"]);
+  assert.equal(taken.rest, "part");
+  assert.equal(taken.overflow, false);
+
+  // A record with no newline never becomes a record, so its size has to be
+  // measured in the tail. This is the case a line parser cannot see.
+  assert.equal(model.takeRecords("x".repeat(model.maxStreamLineBytes + 1)).overflow, true);
+  // A complete but oversized record is dropped rather than parsed.
+  assert.deepEqual(plain(model.takeRecords("ok\n" + "y".repeat(model.maxStreamLineBytes + 1) + "\n").records), ["ok"]);
+});
+
+test("nested values inside one container are capped", () => {
+  const c = model.normalizeContainer({
+    Id: "a".repeat(12), Name: "/big", State: { Status: "running", Running: true },
+    Mounts: Array(500).fill({ Type: "volume", Name: "v" }),
+    Networks: Object.fromEntries(Array.from({ length: 500 }, (_, i) => ["n" + i, {}])),
+    Ports: Object.fromEntries(Array.from({ length: 500 },
+      (_, i) => [`${1000 + i}/tcp`, [{ HostIp: "0.0.0.0", HostPort: String(2000 + i) }]]))
+  });
+  // A snapshot can sit under the byte budget and still carry one container
+  // with thousands of ports, which becomes thousands of QML delegates.
+  assert.ok(c.ports.length <= model.maxNestedItems);
+  assert.ok(c.networks.length <= model.maxNestedItems);
+  assert.equal(model.envEntries(Array(500).fill("A=1")).length, model.maxNestedItems);
+});
+
+test("timestamp maps keep the newest entries and drop the rest", () => {
+  const map = {};
+  for (let i = 0; i < model.maxNotifiedEntries + 50; i += 1) map["id" + i] = i;
+  const pruned = model.pruneTimestamps(map);
+  assert.equal(Object.keys(pruned).length, model.maxNotifiedEntries);
+  // The newest survive: the highest timestamps are the most recent.
+  assert.ok(pruned["id" + (model.maxNotifiedEntries + 49)] !== undefined);
+  assert.equal(pruned.id0, undefined);
+});
