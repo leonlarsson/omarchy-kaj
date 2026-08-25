@@ -33,7 +33,7 @@ Item {
   readonly property bool readOnly: setting("readOnly", false) === true
   readonly property bool showStats: setting("showStats", true) === true
   readonly property string defaultFilter: String(setting("defaultFilter", "all"))
-  readonly property bool notifyOnExit: setting("notifyOnExit", true) === true
+  readonly property bool notifyOnExit: setting("notifyOnExit", false) === true
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 30, 5, 3600)
   readonly property int logLines: intSetting("logLines", 500, 50, 5000)
   readonly property string summary: dockerInstalled
@@ -415,11 +415,15 @@ Item {
     ])
   }
 
-  // Toggling read-only writes the setting, so the panel holds no second copy.
-  // --json keeps the value a real boolean. Every word here is a literal.
-  function setReadOnly(next) {
+  // Toggling a setting writes the setting, so the panel holds no second copy.
+  // --json keeps the value a real boolean. The key is checked against a list,
+  // so only these two can ever reach the command line.
+  readonly property var writableSettings: ["readOnly", "notifyOnExit"]
+
+  function writeSetting(key, next) {
+    if (writableSettings.indexOf(key) === -1) return
     Quickshell.execDetached([
-      "omarchy", "bar", "set", "mozzy.kaj", "readOnly",
+      "omarchy", "bar", "set", "mozzy.kaj", key,
       next === true ? "true" : "false", "--json"
     ])
   }

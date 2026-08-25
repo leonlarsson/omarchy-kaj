@@ -27,6 +27,7 @@ Panel {
   readonly property color dim: Util.alpha(contentForeground, 0.62)
 
   readonly property bool readOnly: kaj ? kaj.readOnly === true : false
+  readonly property bool notifyOnExit: kaj ? kaj.notifyOnExit === true : false
   readonly property bool showStats: kaj ? kaj.showStats === true : true
   readonly property bool installed: kaj ? kaj.dockerInstalled === true : false
   readonly property bool reachable: kaj ? kaj.daemonReachable === true : false
@@ -427,7 +428,7 @@ Panel {
           Column {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width - Style.space(36) - helpButton.width - searchButton.width
-              - lockButton.width - refreshButton.width - Style.space(62)
+              - lockButton.width - bellButton.width - refreshButton.width - Style.space(74)
             spacing: Style.space(2)
 
             Row {
@@ -532,7 +533,20 @@ Panel {
             foreground: root.readOnly ? Color.accent : root.contentForeground
             hoverColor: Color.accent
             fontFamily: root.contentFontFamily
-            onClicked: if (root.kaj) root.kaj.setReadOnly(!root.readOnly)
+            onClicked: if (root.kaj) root.kaj.writeSetting("readOnly", !root.readOnly)
+          }
+
+          PanelActionButton {
+            id: bellButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: root.notifyOnExit ? "󰂚" : "󰂛"
+            tooltipText: root.notifyOnExit
+              ? "Notifications are on. Click to stop them"
+              : "Notifications are off. Click to be told when a container fails"
+            foreground: root.notifyOnExit ? Color.accent : root.contentForeground
+            hoverColor: Color.accent
+            fontFamily: root.contentFontFamily
+            onClicked: if (root.kaj) root.kaj.writeSetting("notifyOnExit", !root.notifyOnExit)
           }
 
           PanelActionButton {

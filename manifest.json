@@ -26,7 +26,7 @@
       "readOnly": false,
       "showStats": true,
       "defaultFilter": "all",
-      "notifyOnExit": true,
+      "notifyOnExit": false,
       "refreshIntervalSec": 30,
       "logLines": 500
     },
@@ -57,7 +57,7 @@
         "key": "notifyOnExit",
         "type": "boolean",
         "label": "Notify on crash or OOM",
-        "defaultValue": true,
+        "defaultValue": false,
         "description": "Send a desktop notification when a container exits non-zero or is killed for running out of memory."
       },
       {
