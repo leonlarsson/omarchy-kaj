@@ -294,6 +294,16 @@ Panel {
 
   // A keystroke that cannot act must say so. Silence looks like a broken key.
   property string notice: ""
+
+  // Every message Kaj shows lands in one banner: refusals, notices, daemon
+  // errors, failed actions. They used to be split between the header subtitle
+  // and a line under the list, so the same refusal appeared in a different
+  // place depending on whether you clicked it or typed it.
+  readonly property string message: {
+    if (notice !== "") return notice
+    return kaj && kaj.lastError !== "" ? kaj.lastError : ""
+  }
+  readonly property bool messageIsError: notice === "" && message !== ""
   property bool helpOpen: false
   // Only one row is expanded at a time.
   property string expandedId: ""
@@ -405,7 +415,7 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(480))
     // The pinned rows always show in full. Only the list scrolls.
     contentHeight: panel.fittedContentHeight(pinnedTop.implicitHeight
-      + content.implicitHeight + pinnedBottom.implicitHeight + Style.space(20))
+      + content.implicitHeight + Style.space(20))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -510,17 +520,23 @@ Panel {
 
             Text {
               width: parent.width
-              // The subtitle doubles as the notice line. A message under a scrolling list is
-              // never seen.
+              // Also the message line. It is the one line that always exists,
+              // so a message replaces the summary rather than adding a row and
+              // shifting everything below it.
               text: {
-                if (root.notice !== "") return root.notice
+                if (root.message !== "") return root.message
                 if (!root.kaj) return ""
                 if (!root.reachable) return root.kaj.summary
                 // While filtering, the honest summary is what is on screen versus what exists.
                 if (root.filtering) return root.flatContainers.length + " of " + root.kaj.totalCount + " shown"
                 return root.kaj.summary
               }
-              color: root.notice !== "" ? Color.accent : root.dim
+              color: root.message === ""
+                ? root.dim
+                : (root.messageIsError ? Color.urgent : Color.accent)
+              // Always one line. Wrapping grew the header and pushed the tabs
+              // down, which is the shift this line exists to avoid.
+              maximumLineCount: 1
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
@@ -730,32 +746,11 @@ Panel {
         PanelSeparator { width: parent.width }
       }
 
-      Column {
-        id: pinnedBottom
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        spacing: Style.space(10)
-
-        // ---- Errors ------------------------------------------------------
-
-        Text {
-          width: parent.width
-          visible: root.kaj && root.kaj.lastError !== ""
-          text: root.kaj ? root.kaj.lastError : ""
-          color: Color.urgent
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WordWrap
-          textFormat: Text.PlainText
-        }
-      }
-
       Flickable {
         id: panelFlick
         anchors.top: pinnedTop.bottom
         anchors.topMargin: Style.space(10)
-        anchors.bottom: pinnedBottom.top
+        anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         contentWidth: width
