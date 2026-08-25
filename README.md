@@ -52,9 +52,7 @@ shows subnet and connected containers, with the built-in `bridge`, `host`, and
 `none` kept at the bottom. Disk is `docker system df`, with whatever is
 reclaimable called out.
 
-Volumes and Networks are read-only. What is using them is worked out from the
-containers Kaj already watches, so a volume stops reading as unused the moment
-something mounts it, rather than when the view is next opened.
+Volumes and Networks are read-only, and update as containers start and stop.
 
 ## Compose projects
 
@@ -88,28 +86,21 @@ To put every setting back to its default:
 
 ## Security
 
-The Docker socket is root-equivalent: anything that can reach it, including
-every member of the `docker` group, can become root on the host. That is a
-property of Docker, not of Kaj, but Kaj runs inside the long-lived shell
-process, so it is written accordingly.
+The Docker socket is root-equivalent: anything that can reach it can become
+root on the host. That is Docker's design, not Kaj's, but Kaj runs inside the
+long-lived shell process, so:
 
-- Every command is an argv array. No `bash -c`, and no container name, image
-  tag, or label is interpolated into a command line.
-- Container state is read with `docker inspect --format`, where every value is
-  `{{json .Field}}` and every key is a literal.
-- Container-controlled text is rendered as `Text.PlainText` with escape
-  sequences and control bytes stripped.
-- Environment variables are fetched only for the row you expand, and every
-  value is hidden until you click it. Kaj does not try to guess which keys are
-  secret: the one such a rule misses is the one that leaks.
-- Removing a container asks first, and the prompt names what is deleted and
-  what is kept. Start, stop, and restart do not prompt.
+- Every command is an argv array. No shell, and no container name, tag, or
+  label is ever interpolated into one.
+- Container-controlled text is rendered as plain text, with escape sequences
+  stripped.
+- Environment variables load only for the row you expand and stay hidden until
+  you click them. Kaj does not try to guess which keys are secret.
 - Kaj never calls `sudo` or `pkexec`.
 
 [Rootless Docker](https://docs.docker.com/engine/security/rootless/) avoids the
-root-equivalence entirely. Kaj honours `DOCKER_HOST`.
-
-Please open an issue for security reports.
+root-equivalence entirely. Kaj honours `DOCKER_HOST`. Please open an issue for
+security reports.
 
 ## Development
 
@@ -126,12 +117,10 @@ dev/kaj unhealthy           # a container that fails its healthcheck
 dev/kaj clean               # remove them all
 ```
 
-`dev/kaj --help` lists everything. `demo` tags busybox under familiar names so
-the container list reads like a real machine; it never overwrites a tag that
-already exists, and removes only the aliases it made. Every image is the same
-6 MB busybox underneath, so the Images view is not worth photographing. It labels what it creates `kaj.dev=1` and
-refuses to act on any container without that label, so it cannot touch a
-workload you care about.
+`dev/kaj --help` lists everything. It labels what it creates `kaj.dev=1` and
+refuses to act on anything without that label, so it cannot touch a workload
+you care about. `demo` also tags busybox under familiar image names, never
+overwriting a tag you already have and removing only the aliases it made.
 
 `Model.js` holds parsing, grouping, formatting, and policy as pure functions.
 `Service.qml` talks to the daemon. `BarWidget.qml` and `Panel.qml` render.
