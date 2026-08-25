@@ -555,10 +555,14 @@ function scrollTarget(contentY, delta, step, contentHeight, viewportHeight) {
   return Math.max(0, Math.min(max, next))
 }
 
+// Wraps. A list long enough to need the cursor is long enough that walking
+// back to the other end is the slow way round, and there is no ambiguity about
+// what the ends mean here: the list is the whole content, not a window onto it.
 function moveCursor(index, delta, length) {
   if (length <= 0) return -1
-  var next = index < 0 ? (delta > 0 ? 0 : length - 1) : index + delta
-  return Math.max(0, Math.min(length - 1, next))
+  if (index < 0) return delta > 0 ? 0 : length - 1
+  var next = (index + delta) % length
+  return next < 0 ? next + length : next
 }
 
 // Keeps the cursor pointing at the same container across a refresh. Without

@@ -157,10 +157,15 @@ Panel {
     resetCursor()
   }
 
+  // Also drops the scroll. Every caller is a change to what the list contains —
+  // a new filter, a new search, a new view — and staying at the old offset
+  // leaves you halfway down a list you have not seen the top of. A refresh
+  // deliberately does not come through here: that keeps its place.
   function resetCursor() {
     cursorIndex = -1
     cursorId = ""
     cursorActive = false
+    panelFlick.contentY = 0
   }
 
   // ---- Search --------------------------------------------------------------
@@ -398,7 +403,10 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(480))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    // The pinned rows are always shown in full; only the list is allowed to
+    // run out of room and scroll.
+    contentHeight: panel.fittedContentHeight(pinnedTop.implicitHeight
+      + content.implicitHeight + pinnedBottom.implicitHeight + Style.space(20))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -432,9 +440,335 @@ Panel {
       onDeleteRequested: root.removeCursor()
       onTextKey: function (text) { root.handleTextKey(text) }
 
+      // Only the list scrolls. The header, tabs, and filter row are how you
+      // navigate, and a long container list used to carry them off the top of
+      // the panel: h and l still changed views, but you could not see which
+      // view you had landed on. The error line is pinned for the same reason —
+      // it is what tells you the last thing you asked for did not happen.
+      Column {
+        id: pinnedTop
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        spacing: Style.space(10)
+
+        // ---- Header ------------------------------------------------------
+
+        Row {
+          width: parent.width
+          spacing: Style.space(12)
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "󰡨"
+            color: Color.accent
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.space(36)
+          }
+
+          Column {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - Style.space(36) - helpButton.width - searchButton.width
+              - lockButton.width - refreshButton.width - Style.space(62)
+            spacing: Style.space(2)
+
+            Row {
+              spacing: Style.space(7)
+
+              Text {
+                text: "Kaj"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.title
+                font.bold: true
+                textFormat: Text.PlainText
+              }
+
+              // Read-only is a mode with real consequences for what the
+              // buttons do, so it is stated in the header rather than hidden
+              // in settings.
+              Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.readOnly
+                width: readOnlyBadge.implicitWidth + Style.space(10)
+                height: readOnlyBadge.implicitHeight + Style.space(3)
+                radius: Style.cornerRadius
+                color: Util.alpha(root.contentForeground, 0.1)
+
+                Row {
+                  id: readOnlyBadge
+                  anchors.centerIn: parent
+                  spacing: Style.space(4)
+
+                  // The lock carries the meaning at a glance; the word is
+                  // kept because an icon alone is a guess about what is
+                  // locked, and this mode is worth being unambiguous about.
+                  Text {
+                    text: "󰌾"
+                    color: root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    textFormat: Text.PlainText
+                  }
+
+                  Text {
+                    text: "READ-ONLY"
+                    color: root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    textFormat: Text.PlainText
+                  }
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              // The subtitle doubles as the transient notice line. A message
+              // appended below the list is never seen: it sits under a
+              // scrolling column, off screen, and is gone before anyone
+              // scrolls to it. Here it is always visible and costs no layout
+              // shift, because the line already exists.
+              text: {
+                if (root.notice !== "") return root.notice
+                if (!root.kaj) return ""
+                if (!root.reachable) return root.kaj.summary
+                // While filtering, the honest summary is what is on screen
+                // versus what exists — not the unfiltered total.
+                if (root.filtering) return root.flatContainers.length + " of " + root.kaj.totalCount + " shown"
+                return root.kaj.summary
+              }
+              color: root.notice !== "" ? Color.accent : root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              textFormat: Text.PlainText
+            }
+          }
+
+          PanelActionButton {
+            id: helpButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰘥"
+            tooltipText: "Keyboard shortcuts  (?)"
+            foreground: root.helpOpen ? Color.accent : root.contentForeground
+            hoverColor: Color.accent
+            fontFamily: root.contentFontFamily
+            onClicked: root.helpOpen = !root.helpOpen
+          }
+
+          PanelActionButton {
+            id: searchButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰍉"
+            tooltipText: "Search  (Ctrl+F)"
+            foreground: root.searchActive ? Color.accent : root.contentForeground
+            hoverColor: Color.accent
+            fontFamily: root.contentFontFamily
+            enabled: root.reachable
+            opacity: enabled ? 1.0 : 0.35
+            onClicked: root.searchActive ? root.cancelSearch() : root.openSearch()
+          }
+
+          // Read-only is reachable from the panel because a setting nobody
+          // can find is a setting nobody uses: until now it could only be
+          // entered from the CLI. The click writes shell.json rather than
+          // flipping a local flag, so the lock survives a restart.
+          PanelActionButton {
+            id: lockButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: root.readOnly ? "󰌾" : "󰌿"
+            tooltipText: root.readOnly
+              ? "Read-only mode is on. Click to allow actions again"
+              : "Read-only mode is off. Click to disable every action that changes a container"
+            foreground: root.readOnly ? Color.accent : root.contentForeground
+            hoverColor: Color.accent
+            fontFamily: root.contentFontFamily
+            onClicked: if (root.kaj) root.kaj.setReadOnly(!root.readOnly)
+          }
+
+          PanelActionButton {
+            id: refreshButton
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰑐"
+            tooltipText: "Refresh"
+            foreground: root.contentForeground
+            hoverColor: Color.accent
+            fontFamily: root.contentFontFamily
+            enabled: root.reachable
+            opacity: enabled ? 1.0 : 0.35
+            onClicked: {
+              if (!root.kaj) return
+              root.kaj.refresh()
+              root.loadFor(root.view)
+            }
+          }
+        }
+
+        // ---- Search field ------------------------------------------------
+
+        TextField {
+          id: searchField
+          width: parent.width
+          visible: root.searchActive
+          // Disabled when hidden so it cannot hold focus: a focused invisible
+          // field both captured typing into the query and left the key
+          // catcher unblocked, so every keystroke was handled twice.
+          enabled: root.searchActive
+          height: visible ? implicitHeight : 0
+          placeholderText: "Filter by name, service, project, or image"
+          foreground: root.contentForeground
+          accent: Color.accent
+          font.family: root.contentFontFamily
+
+          onTextChanged: {
+            if (!root.searchActive) return
+            root.query = text
+            root.resetCursor()
+          }
+
+          Keys.onEscapePressed: function (event) {
+            root.cancelSearch()
+            event.accepted = true
+          }
+          Keys.onReturnPressed: function (event) {
+            root.commitSearch()
+            event.accepted = true
+          }
+          Keys.onEnterPressed: function (event) {
+            root.commitSearch()
+            event.accepted = true
+          }
+          // Down from the field moves straight into the list without
+          // needing Enter first.
+          Keys.onDownPressed: function (event) {
+            root.commitSearch()
+            event.accepted = true
+          }
+        }
+
+        // ---- Keyboard shortcuts ------------------------------------------
+
+        Column {
+          width: parent.width
+          visible: root.helpOpen
+          spacing: Style.space(3)
+
+          Repeater {
+            model: Model.keyHelp
+
+            Row {
+              required property var modelData
+              width: parent.width
+              spacing: Style.space(10)
+
+              Text {
+                width: Style.space(74)
+                horizontalAlignment: Text.AlignRight
+                text: modelData.keys
+                color: Color.accent
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                textFormat: Text.PlainText
+              }
+
+              Text {
+                text: modelData.what
+                color: root.dim
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                textFormat: Text.PlainText
+              }
+            }
+          }
+        }
+
+        // ---- View tabs ---------------------------------------------------
+
+        Row {
+          width: parent.width
+          spacing: Style.space(4)
+          visible: root.reachable
+
+          Repeater {
+            model: Model.views
+
+            Button {
+              required property string modelData
+
+              text: Model.viewLabel(modelData)
+              selected: root.view === modelData
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              onClicked: root.setView(modelData)
+            }
+          }
+        }
+
+        // ---- Status filter chips -----------------------------------------
+
+        Row {
+          width: parent.width
+          spacing: Style.space(5)
+          visible: root.reachable && root.hasContainers && root.view === "containers"
+
+          Repeater {
+            model: Model.statusFilters
+
+            Button {
+              required property string modelData
+              readonly property int count: root.counts ? (root.counts[modelData] || 0) : 0
+
+              // The count makes each chip informative rather than just a
+              // control: the numbers always add up to what clicking produces.
+              text: Model.statusFilterLabel(modelData) + "  " + count
+              selected: root.statusFilter === modelData
+              foreground: modelData === "problems" && count > 0
+                ? Color.urgent : root.contentForeground
+              accent: modelData === "problems" && count > 0 ? Color.urgent : Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              // An empty bucket stays clickable so its empty state can
+              // explain itself, but reads as unremarkable.
+              opacity: count > 0 || root.statusFilter === modelData ? 1.0 : 0.45
+              onClicked: root.setStatusFilter(modelData)
+            }
+          }
+        }
+
+        PanelSeparator { width: parent.width }
+      }
+
+      Column {
+        id: pinnedBottom
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        spacing: Style.space(10)
+
+        // ---- Errors ------------------------------------------------------
+
+        Text {
+          width: parent.width
+          visible: root.kaj && root.kaj.lastError !== ""
+          text: root.kaj ? root.kaj.lastError : ""
+          color: Color.urgent
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+        }
+      }
+
       Flickable {
         id: panelFlick
-        anchors.fill: parent
+        anchors.top: pinnedTop.bottom
+        anchors.topMargin: Style.space(10)
+        anchors.bottom: pinnedBottom.top
+        anchors.left: parent.left
+        anchors.right: parent.right
         contentWidth: width
         contentHeight: content.implicitHeight
         clip: true
@@ -455,294 +789,6 @@ Panel {
           id: content
           width: panelFlick.width
           spacing: Style.space(10)
-
-          // ---- Header ------------------------------------------------------
-
-          Row {
-            width: parent.width
-            spacing: Style.space(12)
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: "󰡨"
-              color: Color.accent
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.space(36)
-            }
-
-            Column {
-              anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(36) - helpButton.width - searchButton.width
-                - lockButton.width - refreshButton.width - Style.space(62)
-              spacing: Style.space(2)
-
-              Row {
-                spacing: Style.space(7)
-
-                Text {
-                  text: "Kaj"
-                  color: root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.title
-                  font.bold: true
-                  textFormat: Text.PlainText
-                }
-
-                // Read-only is a mode with real consequences for what the
-                // buttons do, so it is stated in the header rather than hidden
-                // in settings.
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: root.readOnly
-                  width: readOnlyBadge.implicitWidth + Style.space(10)
-                  height: readOnlyBadge.implicitHeight + Style.space(3)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.contentForeground, 0.1)
-
-                  Row {
-                    id: readOnlyBadge
-                    anchors.centerIn: parent
-                    spacing: Style.space(4)
-
-                    // The lock carries the meaning at a glance; the word is
-                    // kept because an icon alone is a guess about what is
-                    // locked, and this mode is worth being unambiguous about.
-                    Text {
-                      text: "󰌾"
-                      color: root.dim
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.caption
-                      textFormat: Text.PlainText
-                    }
-
-                    Text {
-                      text: "READ-ONLY"
-                      color: root.dim
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.caption
-                      textFormat: Text.PlainText
-                    }
-                  }
-                }
-              }
-
-              Text {
-                width: parent.width
-                // The subtitle doubles as the transient notice line. A message
-                // appended below the list is never seen: it sits under a
-                // scrolling column, off screen, and is gone before anyone
-                // scrolls to it. Here it is always visible and costs no layout
-                // shift, because the line already exists.
-                text: {
-                  if (root.notice !== "") return root.notice
-                  if (!root.kaj) return ""
-                  if (!root.reachable) return root.kaj.summary
-                  // While filtering, the honest summary is what is on screen
-                  // versus what exists — not the unfiltered total.
-                  if (root.filtering) return root.flatContainers.length + " of " + root.kaj.totalCount + " shown"
-                  return root.kaj.summary
-                }
-                color: root.notice !== "" ? Color.accent : root.dim
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-              }
-            }
-
-            PanelActionButton {
-              id: helpButton
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: "󰘥"
-              tooltipText: "Keyboard shortcuts  (?)"
-              foreground: root.helpOpen ? Color.accent : root.contentForeground
-              hoverColor: Color.accent
-              fontFamily: root.contentFontFamily
-              onClicked: root.helpOpen = !root.helpOpen
-            }
-
-            PanelActionButton {
-              id: searchButton
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: "󰍉"
-              tooltipText: "Search  (Ctrl+F)"
-              foreground: root.searchActive ? Color.accent : root.contentForeground
-              hoverColor: Color.accent
-              fontFamily: root.contentFontFamily
-              enabled: root.reachable
-              opacity: enabled ? 1.0 : 0.35
-              onClicked: root.searchActive ? root.cancelSearch() : root.openSearch()
-            }
-
-            // Read-only is reachable from the panel because a setting nobody
-            // can find is a setting nobody uses: until now it could only be
-            // entered from the CLI. The click writes shell.json rather than
-            // flipping a local flag, so the lock survives a restart.
-            PanelActionButton {
-              id: lockButton
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: root.readOnly ? "󰌾" : "󰌿"
-              tooltipText: root.readOnly
-                ? "Read-only mode is on. Click to allow actions again"
-                : "Read-only mode is off. Click to disable every action that changes a container"
-              foreground: root.readOnly ? Color.accent : root.contentForeground
-              hoverColor: Color.accent
-              fontFamily: root.contentFontFamily
-              onClicked: if (root.kaj) root.kaj.setReadOnly(!root.readOnly)
-            }
-
-            PanelActionButton {
-              id: refreshButton
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: "󰑐"
-              tooltipText: "Refresh"
-              foreground: root.contentForeground
-              hoverColor: Color.accent
-              fontFamily: root.contentFontFamily
-              enabled: root.reachable
-              opacity: enabled ? 1.0 : 0.35
-              onClicked: {
-                if (!root.kaj) return
-                root.kaj.refresh()
-                root.loadFor(root.view)
-              }
-            }
-          }
-
-          // ---- Search field ------------------------------------------------
-
-          TextField {
-            id: searchField
-            width: parent.width
-            visible: root.searchActive
-            // Disabled when hidden so it cannot hold focus: a focused invisible
-            // field both captured typing into the query and left the key
-            // catcher unblocked, so every keystroke was handled twice.
-            enabled: root.searchActive
-            height: visible ? implicitHeight : 0
-            placeholderText: "Filter by name, service, project, or image"
-            foreground: root.contentForeground
-            accent: Color.accent
-            font.family: root.contentFontFamily
-
-            onTextChanged: {
-              if (!root.searchActive) return
-              root.query = text
-              root.resetCursor()
-            }
-
-            Keys.onEscapePressed: function (event) {
-              root.cancelSearch()
-              event.accepted = true
-            }
-            Keys.onReturnPressed: function (event) {
-              root.commitSearch()
-              event.accepted = true
-            }
-            Keys.onEnterPressed: function (event) {
-              root.commitSearch()
-              event.accepted = true
-            }
-            // Down from the field moves straight into the list without
-            // needing Enter first.
-            Keys.onDownPressed: function (event) {
-              root.commitSearch()
-              event.accepted = true
-            }
-          }
-
-          // ---- Keyboard shortcuts ------------------------------------------
-
-          Column {
-            width: parent.width
-            visible: root.helpOpen
-            spacing: Style.space(3)
-
-            Repeater {
-              model: Model.keyHelp
-
-              Row {
-                required property var modelData
-                width: parent.width
-                spacing: Style.space(10)
-
-                Text {
-                  width: Style.space(74)
-                  horizontalAlignment: Text.AlignRight
-                  text: modelData.keys
-                  color: Color.accent
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  textFormat: Text.PlainText
-                }
-
-                Text {
-                  text: modelData.what
-                  color: root.dim
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  textFormat: Text.PlainText
-                }
-              }
-            }
-          }
-
-          // ---- View tabs ---------------------------------------------------
-
-          Row {
-            width: parent.width
-            spacing: Style.space(4)
-            visible: root.reachable
-
-            Repeater {
-              model: Model.views
-
-              Button {
-                required property string modelData
-
-                text: Model.viewLabel(modelData)
-                selected: root.view === modelData
-                foreground: root.contentForeground
-                accent: Color.accent
-                fontFamily: root.contentFontFamily
-                fontSize: Style.font.caption
-                onClicked: root.setView(modelData)
-              }
-            }
-          }
-
-          // ---- Status filter chips -----------------------------------------
-
-          Row {
-            width: parent.width
-            spacing: Style.space(5)
-            visible: root.reachable && root.hasContainers && root.view === "containers"
-
-            Repeater {
-              model: Model.statusFilters
-
-              Button {
-                required property string modelData
-                readonly property int count: root.counts ? (root.counts[modelData] || 0) : 0
-
-                // The count makes each chip informative rather than just a
-                // control: the numbers always add up to what clicking produces.
-                text: Model.statusFilterLabel(modelData) + "  " + count
-                selected: root.statusFilter === modelData
-                foreground: modelData === "problems" && count > 0
-                  ? Color.urgent : root.contentForeground
-                accent: modelData === "problems" && count > 0 ? Color.urgent : Color.accent
-                fontFamily: root.contentFontFamily
-                fontSize: Style.font.caption
-                // An empty bucket stays clickable so its empty state can
-                // explain itself, but reads as unremarkable.
-                opacity: count > 0 || root.statusFilter === modelData ? 1.0 : 0.45
-                onClicked: root.setStatusFilter(modelData)
-              }
-            }
-          }
-
-          PanelSeparator { width: parent.width }
 
           // ---- Degraded states ---------------------------------------------
 
@@ -1224,19 +1270,6 @@ Panel {
             color: Color.accent
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
-            textFormat: Text.PlainText
-          }
-
-          // ---- Errors ------------------------------------------------------
-
-          Text {
-            width: parent.width
-            visible: root.kaj && root.kaj.lastError !== ""
-            text: root.kaj ? root.kaj.lastError : ""
-            color: Color.urgent
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
             textFormat: Text.PlainText
           }
         }

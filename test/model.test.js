@@ -393,12 +393,13 @@ test("flattenGroups walks groups as one sequence", () => {
   assert.deepEqual(plain(model.flattenGroups(groups).map(c => c.name)), ["a", "c", "b"]);
 });
 
-test("moveCursor clamps instead of wrapping", () => {
+test("moveCursor wraps at both ends", () => {
   assert.equal(model.moveCursor(-1, 1, 3), 0, "first j selects the top row");
   assert.equal(model.moveCursor(-1, -1, 3), 2, "first k selects the bottom row");
   assert.equal(model.moveCursor(0, 1, 3), 1);
-  assert.equal(model.moveCursor(2, 1, 3), 2, "stops at the end");
-  assert.equal(model.moveCursor(0, -1, 3), 0, "stops at the start");
+  assert.equal(model.moveCursor(2, 1, 3), 0, "past the end comes back to the top");
+  assert.equal(model.moveCursor(0, -1, 3), 2, "before the start goes to the bottom");
+  assert.equal(model.moveCursor(0, 1, 1), 0, "a single row has nowhere to go");
   assert.equal(model.moveCursor(0, 1, 0), -1, "empty list has no cursor");
 });
 
