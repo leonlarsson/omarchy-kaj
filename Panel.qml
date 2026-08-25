@@ -227,7 +227,9 @@ Panel {
       pendingContainer = container
       confirm.message = Model.confirmText(action, container)
       confirm.confirmText = Model.confirmVerb(action)
-      confirm.selectedIndex = 0
+      // 1 is the confirm button. You opened this dialog on purpose, so the
+      // default is the answer you came for; Esc and Cancel are both still there.
+      confirm.selectedIndex = 1
       confirm.opened = true
       Qt.callLater(function () { confirmKeys.forceActiveFocus() })
       return
@@ -242,7 +244,9 @@ Panel {
       pendingAction = "down"
       confirm.message = Model.composeConfirmText(project, stats.running, stats.total)
       confirm.confirmText = "Remove"
-      confirm.selectedIndex = 0
+      // 1 is the confirm button. You opened this dialog on purpose, so the
+      // default is the answer you came for; Esc and Cancel are both still there.
+      confirm.selectedIndex = 1
       confirm.opened = true
       Qt.callLater(function () { confirmKeys.forceActiveFocus() })
       return
