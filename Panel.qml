@@ -204,6 +204,13 @@ Panel {
   // through the dialog that actually matters.
   function requestAction(action, container) {
     if (!kaj || !container) return
+    // Every refusal is decided here and reported the same way. It used to be
+    // split: keys checked first and flashed at the top, while a click or Space
+    // went straight to the service, was refused there, and surfaced as an
+    // error line at the bottom — the same refusal in two places depending on
+    // how you asked for it.
+    var reason = Model.unavailableReason(action, container, root.readOnly)
+    if (reason !== "") { flash(reason); return }
     if (action === "logs") { kaj.openLogs(container); return }
     if (action === "shell") { kaj.openShell(container); return }
 
@@ -246,7 +253,7 @@ Panel {
   function removeCursor() {
     var container = cursorContainer
     if (!container) { flash("Select a container first"); return }
-    var reason = Model.unavailableReason("remove", container)
+    var reason = Model.unavailableReason("remove", container, root.readOnly)
     if (reason !== "") { flash(reason); return }
     requestAction("remove", container)
   }
@@ -264,8 +271,6 @@ Panel {
     if (!container) return
     var action = Model.intendedAction(text, container)
     if (action === "") return
-    var reason = Model.unavailableReason(action, container)
-    if (reason !== "") { flash(reason); return }
     requestAction(action, container)
   }
 

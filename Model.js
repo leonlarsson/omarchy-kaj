@@ -634,8 +634,13 @@ function busyLabel(action) {
 // Why a key did nothing, phrased as the thing to do about it. Returning "" means
 // the action is available and the caller should just run it. Silence is the
 // wrong answer for a keystroke: the user cannot tell a no-op from a broken bind.
-function unavailableReason(action, container) {
+function unavailableReason(action, container, readOnly) {
   if (!container) return "Select a container first"
+  // Read-only comes first, and the ordering is the whole point: a running
+  // container told you to stop it before removing it, which is advice that
+  // does not work — stopping is refused too. The reason has to be the one
+  // that is actually in the way.
+  if (readOnly === true && action !== "logs") return "Read-only mode is on"
   if (availableActions(container).indexOf(action) !== -1) return ""
   if (action === "remove") {
     if (container.running) return "Stop " + container.name + " before removing it"
@@ -1165,8 +1170,11 @@ function barSummary(containers) {
 // Which actions apply to a container in its current state. Keeping this here
 // rather than in QML means the button set is testable, and means the UI cannot
 // offer "start" on something already running.
-function availableActions(container) {
+function availableActions(container, readOnly) {
   if (!container) return []
+  // Logs is the only thing left in read-only: `shell` is a prompt inside the
+  // container, which changes more than any button here.
+  if (readOnly === true) return ["logs"]
   if (container.running && !container.paused) return ["stop", "restart", "pause", "logs", "shell"]
   if (container.paused) return ["unpause", "stop", "logs"]
   return ["start", "remove", "logs"]

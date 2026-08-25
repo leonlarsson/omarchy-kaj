@@ -710,3 +710,21 @@ test("scrolling stops at both edges", () => {
   // Content shorter than the viewport cannot scroll at all.
   assert.equal(model.scrollTarget(0, 1, 46, 200, 400), 0);
 });
+
+test("read-only says what is actually in the way", () => {
+  const running = container({ id: "a", name: "api", running: true });
+  // Not read-only: the advice is sound, stop it and you can remove it.
+  assert.equal(model.unavailableReason("remove", running, false),
+    "Stop api before removing it");
+  // Read-only: the old advice was useless, because stopping is refused too.
+  assert.equal(model.unavailableReason("remove", running, true), "Read-only mode is on");
+  assert.equal(model.unavailableReason("stop", running, true), "Read-only mode is on");
+  assert.equal(model.unavailableReason("logs", running, true), "");
+});
+
+test("read-only leaves only the actions that can run", () => {
+  const running = container({ id: "a", name: "api", running: true });
+  assert.deepEqual(plain(model.availableActions(running, true)), ["logs"]);
+  assert.deepEqual(plain(model.availableActions(running, false)),
+    ["stop", "restart", "pause", "logs", "shell"]);
+});

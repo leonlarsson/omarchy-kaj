@@ -42,7 +42,10 @@ Item {
 
   readonly property string severity: Model.containerSeverity(container)
   readonly property bool running: container ? container.running === true : false
-  readonly property var actions: Model.availableActions(container)
+  // In read-only mode the buttons that cannot fire are not drawn at all. A row
+  // of greyed-out icons is a row of things to try clicking; leaving only what
+  // works says the same thing without the invitation.
+  readonly property var actions: Model.availableActions(container, readOnly)
   readonly property color dim: Util.alpha(foreground, 0.6)
   readonly property real memoryPressure: Model.memoryPressure(container, stats)
   readonly property real cpuPressure: Model.cpuPressure(container, stats)
