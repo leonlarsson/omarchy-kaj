@@ -68,7 +68,6 @@ Item {
     color: row.hasCursor
       ? Style.selectedFillFor(row.foreground, Color.accent)
       : "transparent"
-    Behavior on color { ColorAnimation { duration: 90 } }
 
     // An accent bar on the selected row, so the cursor is legible in any theme.
     Rectangle {
