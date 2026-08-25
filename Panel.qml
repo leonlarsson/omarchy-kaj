@@ -334,6 +334,7 @@ Panel {
       resetCursor()
     } else {
       searchActive = false
+      if (kaj) kaj.clearError()
       // Collapse on close and drop the fetched values. Reopening must never show an
       // environment read some time ago.
       if (kaj && expandedId !== "") kaj.forgetEnv(expandedId)

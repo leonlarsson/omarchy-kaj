@@ -29,6 +29,7 @@ Item {
   property int runningCount: 0
   property int totalCount: 0
   property string lastError: ""
+  property bool errorFromAction: false
 
   // Types, defaults and limits all live in Model.settingsSchema.
   readonly property bool readOnly: Model.readSetting(settings, "readOnly")
@@ -41,6 +42,11 @@ Item {
   readonly property string summary: dockerInstalled
     ? (daemonReachable ? Model.barSummary(containers) : "Docker daemon not running")
     : "Docker not installed"
+
+  function clearError() {
+    lastError = ""
+    errorFromAction = false
+  }
 
   function containerById(id) {
     for (var i = 0; i < containers.length; i++) {
@@ -106,8 +112,10 @@ Item {
   // Counts always come from the full list, never the filtered one, so the bar
   // cannot hide a problem.
   function applyContainers(list) {
-    // A snapshot that arrived proves the last failure is over.
-    lastError = ""
+    // A snapshot that arrived proves the last refresh failure is over. An
+    // action that failed is not: the refresh that follows one used to wipe the
+    // reason off the screen before it could be read.
+    if (!errorFromAction) lastError = ""
     containers = list
     severity = Model.rollupSeverity(list)
     runningCount = Model.countRunning(list)
@@ -293,7 +301,7 @@ Item {
     var key = composeBusyKey(project)
     if (busyAction(key) !== "") return
 
-    lastError = ""
+    clearError()
     // Every container in the project is about to stop because it was asked to.
     for (var i = 0; i < containers.length; i++) {
       if ((containers[i].project || "") === project) markSelfInitiated(containers[i].id)
@@ -320,7 +328,7 @@ Item {
     var command = commandFor(action, container)
     if (!command) return
 
-    lastError = ""
+    clearError()
     // Stopping on purpose must not notify the person who asked.
     if (action === "stop" || action === "restart" || action === "remove") {
       markSelfInitiated(container.id)
@@ -341,7 +349,10 @@ Item {
 
   function finishAction(id, verb, failure) {
     setBusy(id, "")
-    if (failure && failure !== "") lastError = failure
+    if (failure && failure !== "") {
+      lastError = failure
+      errorFromAction = true
+    }
     // The event stream reports the real change. This only settles the UI when an
     // action was a no-op and produced no event.
     refresh()

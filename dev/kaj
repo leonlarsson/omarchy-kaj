@@ -13,6 +13,7 @@ LABEL_KEY="kaj.dev"
 LABEL="$LABEL_KEY=1"
 IMAGE="${KAJ_DEV_IMAGE:-busybox:latest}"
 PREFIX="kaj-dev-"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { echo "kaj: $*" >&2; exit 1; }
 
@@ -34,10 +35,9 @@ resolve() {
   local want="$1" name
   [[ -n $want ]] || die "expected a container name"
   name="$want"
-  [[ $name == "$PREFIX"* ]] || name="$PREFIX$want"
-
+  docker container inspect "$name" >/dev/null 2>&1 || name="$PREFIX$want"
   docker container inspect "$name" >/dev/null 2>&1 \
-    || die "no such container: $name"
+    || die "no such container: $want"
 
   local label
   label=$(docker container inspect "$name" --format "{{index .Config.Labels \"$LABEL_KEY\"}}" 2>/dev/null || true)
@@ -56,6 +56,15 @@ run() {
   docker run -d --label "$LABEL" --name "$PREFIX$name" "$@" >/dev/null
 }
 
+# Real projects, brought up by compose itself. Hand-applied labels render the
+# same but compose start refuses them, so group actions could not be tested.
+project() {
+  local name="$1"
+  docker compose --project-name "$name" --file "$HERE/fixtures/$name.yaml" up --detach >/dev/null 2>&1
+}
+
+# For the rendering fixtures only: text compose would never accept as a project
+# name, which is the point of them.
 compose() {
   local project="$1" service="$2" name="$3"; shift 3
   docker run -d --label "$LABEL" \
@@ -69,17 +78,9 @@ cmd_seed() {
   cmd_clean >/dev/null
   echo "seeding..."
 
-  # A healthy multi-service project: the common case.
-  compose shop web    shop-web    --no-healthcheck -p 18080:80 "$IMAGE" sleep 86400
-  compose shop api    shop-api    --no-healthcheck "$IMAGE" sleep 86400
-  compose shop worker shop-worker --no-healthcheck "$IMAGE" sleep 86400
-
-  # A project in trouble: one healthy, one failing. Exercises the per-group
-  # severity rollup that turns a project header red.
-  compose blog db    blog-db \
-    --health-cmd 'true' --health-interval 5s --health-retries 1 "$IMAGE" sleep 86400
-  compose blog cache blog-cache \
-    --health-cmd 'false' --health-interval 3s --health-retries 1 "$IMAGE" sleep 86400
+  # Two real Compose projects: a healthy one, and one with a failing service.
+  project shop
+  project blog
 
   # Container metadata is written by whoever built the image, and Kaj treats it
   # as untrusted. Docker restricts container *names* to [a-zA-Z0-9][a-zA-Z0-9_.-],

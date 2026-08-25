@@ -1,0 +1,22 @@
+# A healthy multi-service project: the common case.
+# Run through docker compose so the containers carry the labels Compose itself
+# writes. Hand-applied labels look right in the panel but compose start refuses
+# them, which made the group actions impossible to test.
+services:
+  web:
+    image: busybox:latest
+    command: sleep 86400
+    ports: ["18080:80"]
+    labels: { kaj.dev: "1" }
+  api:
+    image: busybox:latest
+    command: sleep 86400
+    labels: { kaj.dev: "1" }
+  worker:
+    image: busybox:latest
+    command: sleep 86400
+    labels: { kaj.dev: "1" }
+
+networks:
+  default:
+    labels: { kaj.dev: "1" }
