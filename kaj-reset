@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Puts every Kaj setting back to its default. The defaults come from
+# manifest.json, which a test keeps in step with Model.js.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+command -v jq >/dev/null || { echo "kaj-reset: jq not found" >&2; exit 1; }
+
+# tojson so a string default arrives as valid JSON: --json rejects a bare word.
+jq -r '.barWidget.defaults | to_entries[] | "\(.key)\t\(.value|tojson)"' manifest.json |
+while IFS=$'\t' read -r key value; do
+  omarchy bar set mozzy.kaj "$key" "$value" --json >/dev/null
+  echo "$key = $value"
+done

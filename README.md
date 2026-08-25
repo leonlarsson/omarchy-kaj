@@ -18,7 +18,7 @@ Optionally bind the panel to a key:
 
 ```lua
 -- ~/.config/hypr/bindings.lua
-o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
+o.bind("SUPER + D", "Docker", "omarchy-shell mozzy.kaj toggle")
 ```
 
 ## Keys
@@ -78,6 +78,12 @@ boolean or number rather than a string.
 | `notifyOnExit` | `false` | Notify when a container exits non-zero or is OOM-killed. The bell in the panel header toggles it. |
 | `refreshIntervalSec` | `30` | Reconcile interval. Kaj follows `docker events`, so this only bounds how long a missed event goes unnoticed. |
 | `logLines` | `500` | History shown before `logs` starts following. |
+
+To put every setting back to its default:
+
+```bash
+~/.config/omarchy/plugins/mozzy.kaj/kaj-reset
+```
 
 ## Security
 
