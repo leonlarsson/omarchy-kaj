@@ -100,6 +100,11 @@ cmd_seed() {
     --health-interval 5s "$IMAGE" sleep 86400
   # Restart-looping: also a stress test, since it emits events constantly.
   run looping  --no-healthcheck --restart always "$IMAGE" sh -c 'sleep 2; exit 1'
+  # Resource limits, so the memory meter has something to draw. Two of them:
+  # one idling well under its limit, one deliberately close to it.
+  run limited  --no-healthcheck --memory 512m --cpus 1.5 "$IMAGE" sleep 86400
+  run squeezed --no-healthcheck --memory 16m \
+    "$IMAGE" sh -c 'dd if=/dev/zero of=/dev/shm/fill bs=1k count=14000 2>/dev/null; sleep 86400'
 
   # Stopped cleanly. It has to exit 0 on its own: `docker stop` on a `sleep`
   # ends in SIGKILL and exit 137, which the panel would rightly call a problem —

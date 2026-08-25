@@ -125,7 +125,7 @@ Item {
   // Each {{json ...}} is encoded by Go, and every key is a literal we wrote, so
   // no container-controlled text can break out of the JSON structure. This is
   // the safe alternative to hand-building JSON in a Go template.
-  readonly property string inspectFormat: '{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"State":{{json .State}},"Labels":{{json .Config.Labels}},"Image":{{json .Config.Image}},"Ports":{{json .NetworkSettings.Ports}},"RestartCount":{{json .RestartCount}}}'
+  readonly property string inspectFormat: '{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"State":{{json .State}},"Labels":{{json .Config.Labels}},"Image":{{json .Config.Image}},"Ports":{{json .NetworkSettings.Ports}},"RestartCount":{{json .RestartCount}},"MemoryLimit":{{json .HostConfig.Memory}},"NanoCpus":{{json .HostConfig.NanoCpus}}}'
 
   // Counts and severity always come from the full list, never from whatever the
   // panel is currently filtered to, so the bar cannot under-report a problem

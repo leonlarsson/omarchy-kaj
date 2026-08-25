@@ -584,3 +584,48 @@ test("image search matches name and id", () => {
   assert.ok(model.matchesImageQuery(image, "269abb"));
   assert.ok(!model.matchesImageQuery(image, "postgres"));
 });
+
+test("memory pressure is measured against the container's own limit", () => {
+  const limited = { memoryLimit: 512 * 1e6 }
+  assert.equal(model.memoryPressure(limited, { memUsed: 128 * 1e6 }), 0.25)
+  // No limit means no pressure to report: the host's total says nothing
+  // about whether this container is near trouble.
+  assert.equal(model.memoryPressure({ memoryLimit: 0 }, { memUsed: 128 * 1e6 }), -1)
+  assert.equal(model.memoryPressure(limited, null), -1)
+  assert.equal(model.memoryPressure(null, { memUsed: 1 }), -1)
+})
+
+test("limits are parsed from inspect, with 0 meaning unlimited", () => {
+  const limited = model.normalizeContainer({
+    Id: "a1", Name: "/api", State: { Status: "running", Running: true },
+    MemoryLimit: 536870912, NanoCpus: 1500000000
+  })
+  assert.equal(limited.memoryLimit, 536870912)
+  assert.equal(limited.cpuLimit, 1.5)
+
+  const unlimited = model.normalizeContainer({
+    Id: "a2", Name: "/web", State: { Status: "running", Running: true },
+    MemoryLimit: 0, NanoCpus: 0
+  })
+  assert.equal(unlimited.memoryLimit, 0)
+  assert.equal(unlimited.cpuLimit, 0)
+})
+
+test("cpu pressure is measured against the container's own cpu ration", () => {
+  // 150% of a host's cores is meaningless without knowing the ration: here it
+  // is exactly the 1.5 CPUs this container was given.
+  assert.equal(model.cpuPressure({ cpuLimit: 1.5 }, { cpu: 150 }), 1);
+  assert.equal(model.cpuPressure({ cpuLimit: 2 }, { cpu: 50 }), 0.25);
+  assert.equal(model.cpuPressure({ cpuLimit: 0 }, { cpu: 150 }), -1);
+  assert.equal(model.cpuPressure(null, { cpu: 1 }), -1);
+});
+
+test("memory is formatted in binary units, disk in decimal", () => {
+  // `docker stats` says 512MiB and `--memory 512m` means MiB; `docker images`
+  // and `docker system df` report decimal. Kaj follows each convention where
+  // it belongs rather than picking one and being wrong half the time.
+  assert.equal(model.formatMemory(536870912), "512 MiB");
+  assert.equal(model.formatMemory(1024), "1.0 KiB");
+  assert.equal(model.formatMemory(0), "0 B");
+  assert.equal(model.formatBytes(536870912), "537 MB");
+});

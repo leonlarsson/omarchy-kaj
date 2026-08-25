@@ -44,6 +44,8 @@ Item {
   readonly property bool running: container ? container.running === true : false
   readonly property var actions: Model.availableActions(container)
   readonly property color dim: Util.alpha(foreground, 0.6)
+  readonly property real memoryPressure: Model.memoryPressure(container, stats)
+  readonly property real cpuPressure: Model.cpuPressure(container, stats)
   // Stats and actions share one right-anchored slot, so both sit at the same
   // fixed edge on every row instead of drifting with the name length or the
   // number of buttons a given state happens to offer.
@@ -309,7 +311,7 @@ Item {
       width: parent.width
       horizontalAlignment: Text.AlignRight
       text: row.stats ? Model.formatPercent(row.stats.cpu) + " cpu" : ""
-      color: row.dim
+      color: row.cpuPressure >= Model.pressureWarning ? Color.urgent : row.dim
       font.family: row.fontFamily
       font.pixelSize: Style.font.caption
       textFormat: Text.PlainText
@@ -318,11 +320,31 @@ Item {
     Text {
       width: parent.width
       horizontalAlignment: Text.AlignRight
-      text: row.stats ? Model.formatBytes(row.stats.memUsed) : ""
-      color: row.dim
+      text: row.stats ? Model.formatMemory(row.stats.memUsed) : ""
+      color: row.memoryPressure >= Model.pressureWarning ? Color.urgent : row.dim
       font.family: row.fontFamily
       font.pixelSize: Style.font.caption
       textFormat: Text.PlainText
+    }
+
+    // A meter rather than a second number: the stats column is a glance, and
+    // "483 KB / 512 MB" does not fit in it. Drawn only when the container has
+    // a limit of its own — against the host's memory the bar would be a
+    // sliver on every row and mean nothing.
+    Rectangle {
+      width: parent.width
+      height: Style.space(2)
+      visible: row.memoryPressure >= 0
+      radius: height / 2
+      color: Util.alpha(row.foreground, 0.15)
+
+      Rectangle {
+        width: parent.width * Math.max(0, Math.min(1, row.memoryPressure))
+        height: parent.height
+        radius: parent.radius
+        color: row.memoryPressure >= Model.pressureWarning
+          ? Color.urgent : Util.alpha(row.foreground, 0.55)
+      }
     }
   }
 

@@ -161,8 +161,18 @@ function normalizeContainer(raw) {
     createdAt: parseTime(raw.Created),
     project: sanitizeLine(labels["com.docker.compose.project"] || ""),
     service: sanitizeLine(labels["com.docker.compose.service"] || ""),
-    ports: normalizePorts(raw.Ports)
+    ports: normalizePorts(raw.Ports),
+    // 0 means "no limit set", which is also what Docker reports for a
+    // container that simply inherits the host's memory. Keeping the raw 0
+    // is what lets the UI tell "unlimited" from "limited to all of it".
+    memoryLimit: positiveNumber(raw.MemoryLimit),
+    cpuLimit: positiveNumber(raw.NanoCpus) / 1e9
   }
+}
+
+function positiveNumber(value) {
+  var n = Number(value)
+  return isFinite(n) && n > 0 ? n : 0
 }
 
 function normalizeContainers(list) {
@@ -293,6 +303,36 @@ function normalizeStat(raw) {
     memLimit: mem.limit,
     pids: parseInt(raw.PIDs, 10) || 0
   }
+}
+
+// Usage against the container's own limit, or -1 when it has none. An
+// unlimited container is not "using 3% of memory" in any useful sense: the
+// number it would be measured against is the whole host, which says nothing
+// about whether this container is close to trouble.
+function memoryPressure(container, stats) {
+  if (!container || !stats) return -1
+  var limit = Number(container.memoryLimit || 0)
+  if (!isFinite(limit) || limit <= 0) return -1
+  var used = Number(stats.memUsed || 0)
+  if (!isFinite(used) || used < 0) return -1
+  return used / limit
+}
+
+// The threshold a figure turns urgent at. Not a cliff — a container can sit
+// at 95% happily — but it is the point where trouble stops being surprising.
+var pressureWarning = 0.9
+
+// The same question for CPU, and the reason it is answerable at all: without
+// a limit, `docker stats` reports a percentage of every core on the host, so
+// 150% is either half of the machine or the whole of this container's ration
+// depending on a number the stats stream never mentions.
+function cpuPressure(container, stats) {
+  if (!container || !stats) return -1
+  var cpus = Number(container.cpuLimit || 0)
+  if (!isFinite(cpus) || cpus <= 0) return -1
+  var cpu = Number(stats.cpu || 0)
+  if (!isFinite(cpu) || cpu < 0) return -1
+  return cpu / (cpus * 100)
 }
 
 // Stats arrive as a stream keyed by short id; fold them into a lookup the UI
@@ -818,6 +858,23 @@ function formatUptime(startedAtMs, nowMs) {
   var days = Math.floor(hours / 24)
   if (days < 7) return days + "d " + (hours % 24) + "h"
   return days + "d"
+}
+
+// Memory is binary everywhere it is discussed: `docker stats` prints MiB,
+// `--memory 512m` means 512 MiB, and free(1) agrees. Printing 537 MB for a
+// limit someone wrote as 512m makes Kaj look wrong even though the byte count
+// is right. Image and disk sizes stay decimal, which is what `docker images`
+// and `docker system df` report.
+function formatMemory(bytes) {
+  var n = Number(bytes)
+  if (!isFinite(n) || n <= 0) return "0 B"
+  var units = ["B", "KiB", "MiB", "GiB", "TiB"]
+  var index = 0
+  while (n >= 1024 && index < units.length - 1) {
+    n = n / 1024
+    index++
+  }
+  return (n >= 100 || index === 0 ? Math.round(n) : n.toFixed(1)) + " " + units[index]
 }
 
 function formatBytes(bytes) {
