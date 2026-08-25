@@ -360,11 +360,28 @@ Item {
     ])
   }
 
+  // A shell is not an inspection. `docker exec` hands over a root prompt inside
+  // the container, which can delete files, kill processes, and rewrite data —
+  // more than any button on the row can do. Read-only refuses it for the same
+  // reason it refuses `stop`. Logs, which really only read, stay open.
   function openShell(container) {
     if (!container || !container.running) return
+    if (readOnly) { lastError = "Read-only mode is on"; return }
     Quickshell.execDetached([
       "omarchy-launch-terminal",
       "docker", "exec", "--interactive", "--tty", container.id, "sh"
+    ])
+  }
+
+  // Read-only is a setting, so toggling it writes the setting rather than
+  // holding a second copy of the truth in the panel. `omarchy bar set` owns
+  // shell.json; --json keeps the value a real boolean, since without it the
+  // string "false" would be written and read back as a value that is not
+  // false. Kaj's own argv rule still holds: every word here is a literal.
+  function setReadOnly(next) {
+    Quickshell.execDetached([
+      "omarchy", "bar", "set", "mozzy.kaj", "readOnly",
+      next === true ? "true" : "false", "--json"
     ])
   }
 

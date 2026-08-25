@@ -351,9 +351,10 @@ Item {
         required property string modelData
 
         readonly property bool destructive: Model.isDestructive(modelData)
-        // Read-only mode disables mutation but deliberately leaves logs and
-        // shell alone: reading is the thing read-only mode is for.
-        readonly property bool inspectOnly: modelData === "logs" || modelData === "shell"
+        // Read-only mode leaves logs alone, because reading is the thing the
+        // mode is for. It does not exempt `shell`: a prompt inside the
+        // container can change more than any other button here.
+        readonly property bool inspectOnly: modelData === "logs"
 
         iconText: {
           switch (modelData) {

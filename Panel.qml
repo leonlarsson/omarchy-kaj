@@ -448,7 +448,8 @@ Panel {
 
             Column {
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(36) - helpButton.width - searchButton.width - refreshButton.width - Style.space(50)
+              width: parent.width - Style.space(36) - helpButton.width - searchButton.width
+                - lockButton.width - refreshButton.width - Style.space(62)
               spacing: Style.space(2)
 
               Row {
@@ -469,19 +470,34 @@ Panel {
                 Rectangle {
                   anchors.verticalCenter: parent.verticalCenter
                   visible: root.readOnly
-                  width: readOnlyLabel.implicitWidth + Style.space(10)
-                  height: readOnlyLabel.implicitHeight + Style.space(3)
+                  width: readOnlyBadge.implicitWidth + Style.space(10)
+                  height: readOnlyBadge.implicitHeight + Style.space(3)
                   radius: Style.cornerRadius
                   color: Util.alpha(root.contentForeground, 0.1)
 
-                  Text {
-                    id: readOnlyLabel
+                  Row {
+                    id: readOnlyBadge
                     anchors.centerIn: parent
-                    text: "READ-ONLY"
-                    color: root.dim
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                    textFormat: Text.PlainText
+                    spacing: Style.space(4)
+
+                    // The lock carries the meaning at a glance; the word is
+                    // kept because an icon alone is a guess about what is
+                    // locked, and this mode is worth being unambiguous about.
+                    Text {
+                      text: "󰌾"
+                      color: root.dim
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      textFormat: Text.PlainText
+                    }
+
+                    Text {
+                      text: "READ-ONLY"
+                      color: root.dim
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      textFormat: Text.PlainText
+                    }
                   }
                 }
               }
@@ -532,6 +548,23 @@ Panel {
               enabled: root.reachable
               opacity: enabled ? 1.0 : 0.35
               onClicked: root.searchActive ? root.cancelSearch() : root.openSearch()
+            }
+
+            // Read-only is reachable from the panel because a setting nobody
+            // can find is a setting nobody uses: until now it could only be
+            // entered from the CLI. The click writes shell.json rather than
+            // flipping a local flag, so the lock survives a restart.
+            PanelActionButton {
+              id: lockButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: root.readOnly ? "󰌾" : "󰌿"
+              tooltipText: root.readOnly
+                ? "Read-only mode is on. Click to allow actions again"
+                : "Read-only mode is off. Click to disable every action that changes a container"
+              foreground: root.readOnly ? Color.accent : root.contentForeground
+              hoverColor: Color.accent
+              fontFamily: root.contentFontFamily
+              onClicked: if (root.kaj) root.kaj.setReadOnly(!root.readOnly)
             }
 
             PanelActionButton {

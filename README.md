@@ -54,11 +54,13 @@ Kaj cannot rely on still being where it was.
 
 ## Settings
 
-Set per widget in the Omarchy settings panel, or in `~/.config/omarchy/shell.json`.
+Set per widget with `omarchy bar set mozzy.kaj <key> <value> --json`, or in
+`~/.config/omarchy/shell.json`. Pass `--json` so the value is written as a real
+boolean or number rather than a string.
 
 | Setting | Default | Description |
 |---|---|---|
-| `readOnly` | `false` | Disable every action that changes a container. Status, stats, and logs still work. |
+| `readOnly` | `false` | Disable every action that changes a container. Status, stats, and logs still work. The lock in the panel header toggles it. |
 | `showStats` | `true` | Stream live CPU and memory. |
 | `defaultFilter` | `all` | Status filter selected when the panel opens: `all`, `running`, `stopped`, or `problems`. |
 | `notifyOnExit` | `true` | Notify when a container exits non-zero or is OOM-killed. |
