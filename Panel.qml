@@ -31,7 +31,10 @@ Panel {
   readonly property bool showResourceUsage: kaj ? kaj.showResourceUsage === true : true
   readonly property bool installed: kaj ? kaj.dockerInstalled === true : false
   readonly property bool reachable: kaj ? kaj.daemonReachable === true : false
-  readonly property bool probing: kaj ? kaj.probing === true : true
+  // No service at all: it failed to load, which is not the same as probing.
+  // Left as probing, the panel waited forever and showed nothing.
+  readonly property bool serviceMissing: !kaj
+  readonly property bool probing: kaj ? kaj.probing === true : false
   readonly property bool hasContainers: kaj ? kaj.totalCount > 0 : false
 
   // ---- Filter and search state ---------------------------------------------
@@ -750,12 +753,38 @@ Panel {
 
           // ---- Degraded states ---------------------------------------------
 
+          Column {
+            width: parent.width
+            spacing: Style.space(8)
+            visible: root.serviceMissing
+
+            Text {
+              width: parent.width
+              text: "Kaj failed to load"
+              color: Color.urgent
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+            }
+
+            Text {
+              width: parent.width
+              text: "See the error with: journalctl --user -b | grep mozzy.kaj"
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+            }
+          }
+
           // Docker missing or unreachable is the whole state of the panel, so it takes
           // the whole panel.
           Column {
             width: parent.width
             spacing: Style.space(8)
-            visible: !root.probing && (!root.installed || !root.reachable)
+            visible: !root.probing && !root.serviceMissing && (!root.installed || !root.reachable)
 
             Text {
               width: parent.width
