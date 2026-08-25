@@ -40,9 +40,17 @@ o.bind("SUPER", "D", "omarchy-shell mozzy.kaj toggle")
 
 ## Views
 
-Containers, Images, and Disk. Images lists what is on disk largest first and
-flags anything no container uses; Disk is `docker system df`, with whatever is
+Containers, Images, Volumes, Networks, and Disk.
+
+Images lists what is on disk largest first and flags anything no container
+uses. Volumes shows each volume's size and the containers using it. Networks
+shows subnet and connected containers, with the built-in `bridge`, `host`, and
+`none` kept at the bottom. Disk is `docker system df`, with whatever is
 reclaimable called out.
+
+Volumes and Networks are read-only. What is using them is worked out from the
+containers Kaj already watches, so a volume stops reading as unused the moment
+something mounts it, rather than when the view is next opened.
 
 ## Compose projects
 

@@ -48,6 +48,8 @@ resolve() {
 }
 
 seeded_ids() { docker ps -aq --filter "label=$LABEL"; }
+seeded_volumes() { docker volume ls -q --filter "label=$LABEL"; }
+seeded_networks() { docker network ls -q --filter "label=$LABEL"; }
 
 run() {
   local name="$1"; shift
@@ -100,6 +102,14 @@ cmd_seed() {
     --health-interval 5s "$IMAGE" sleep 86400
   # Restart-looping: also a stress test, since it emits events constantly.
   run looping  --no-healthcheck --restart always "$IMAGE" sh -c 'sleep 2; exit 1'
+  # A network and volumes, so the volumes and networks views have both the
+  # in-use and the unused case to render.
+  docker network create --label "$LABEL" "${PREFIX}net" >/dev/null
+  docker volume create --label "$LABEL" "${PREFIX}data" >/dev/null
+  docker volume create --label "$LABEL" "${PREFIX}orphan" >/dev/null
+  run mounted --no-healthcheck \
+    --network "${PREFIX}net" --volume "${PREFIX}data:/data" "$IMAGE" sleep 86400
+
   # Resource limits, so the memory meter has something to draw. Two of them:
   # one idling well under its limit, one deliberately close to it.
   run limited  --no-healthcheck --memory 512m --cpus 1.5 "$IMAGE" sleep 86400
@@ -122,14 +132,27 @@ cmd_seed() {
 
 cmd_clean() {
   require_docker
-  local ids
+  local ids volumes networks
   mapfile -t ids < <(seeded_ids)
-  if [[ ${#ids[@]} -eq 0 ]]; then
+  mapfile -t volumes < <(seeded_volumes)
+  mapfile -t networks < <(seeded_networks)
+  if [[ ${#ids[@]} -eq 0 && ${#volumes[@]} -eq 0 && ${#networks[@]} -eq 0 ]]; then
     echo "nothing to remove"
     return 0
   fi
-  echo "removing ${#ids[@]} seeded container(s)"
-  docker rm -f "${ids[@]}" >/dev/null
+  if [[ ${#ids[@]} -gt 0 ]]; then
+    echo "removing ${#ids[@]} seeded container(s)"
+    docker rm -f "${ids[@]}" >/dev/null
+  fi
+  # Containers first: a volume or network still attached to one cannot go.
+  if [[ ${#volumes[@]} -gt 0 ]]; then
+    echo "removing ${#volumes[@]} seeded volume(s)"
+    docker volume rm "${volumes[@]}" >/dev/null
+  fi
+  if [[ ${#networks[@]} -gt 0 ]]; then
+    echo "removing ${#networks[@]} seeded network(s)"
+    docker network rm "${networks[@]}" >/dev/null
+  fi
 }
 
 cmd_status() {

@@ -629,3 +629,71 @@ test("memory is formatted in binary units, disk in decimal", () => {
   assert.equal(model.formatMemory(0), "0 B");
   assert.equal(model.formatBytes(536870912), "537 MB");
 });
+
+test("volume users count stopped containers, network members do not", () => {
+  const containers = [
+    { name: "api", running: true, mounts: ["data"], networks: ["app"] },
+    { name: "old", running: false, mounts: ["data"], networks: ["app"] }
+  ];
+  // `docker volume rm` refuses while a stopped container still references it.
+  assert.deepEqual(plain(model.volumeUsers(containers, "data")), ["api", "old"]);
+  // A stopped container has no endpoint, and Docker will remove the network
+  // without complaint, so it is not a member.
+  assert.deepEqual(plain(model.networkMembers(containers, "app")), ["api"]);
+  assert.deepEqual(plain(model.volumeUsers(containers, "nothing")), []);
+});
+
+test("bind mounts never make a volume look used", () => {
+  const c = model.normalizeContainer({
+    Id: "a1", Name: "/api", State: { Status: "running", Running: true },
+    Mounts: [
+      { Type: "volume", Name: "data" },
+      { Type: "bind", Source: "/home/leon/src" }
+    ],
+    Networks: { app: {}, bridge: {} }
+  });
+  assert.deepEqual(plain(c.mounts), ["data"]);
+  assert.deepEqual(plain(c.networks), ["app", "bridge"]);
+});
+
+test("usage label names a few users and counts the rest", () => {
+  assert.equal(model.usageLabel([]), "unused");
+  assert.equal(model.usageLabel(["a", "b"]), "a, b");
+  assert.equal(model.usageLabel(["a", "b", "c", "d", "e"]), "a, b, c +2");
+});
+
+test("volume labels survive Docker's flat label string", () => {
+  const volumes = model.normalizeVolumes([
+    { Name: "small", Size: "1.2MB", Labels: "com.docker.compose.project=shop" },
+    { Name: "big", Size: "4GB", Labels: "" }
+  ]);
+  // Largest first, the same as images.
+  assert.equal(volumes[0].name, "big");
+  assert.equal(volumes[0].size, 4e9);
+  assert.equal(volumes[1].project, "shop");
+});
+
+test("built-in networks sort last and are marked", () => {
+  const networks = model.normalizeNetworks([
+    { Id: "n1", Name: "bridge", Driver: "bridge" },
+    { Id: "n2", Name: "app", Driver: "bridge", Labels: { "com.docker.compose.project": "shop" },
+      IPAM: { Config: [{ Subnet: "172.18.0.0/16" }] } }
+  ]);
+  assert.equal(networks[0].name, "app");
+  assert.equal(networks[0].subnet, "172.18.0.0/16");
+  assert.equal(networks[0].project, "shop");
+  assert.equal(networks[0].builtin, false);
+  assert.equal(networks[1].builtin, true);
+});
+
+test("parseJson takes a whole document and refuses anything else", () => {
+  assert.deepEqual(plain(model.parseJson('[{"Name":"v"}]')), [{ Name: "v" }]);
+  assert.deepEqual(plain(model.parseJson("")), []);
+  assert.deepEqual(plain(model.parseJson("not json")), []);
+  assert.deepEqual(plain(model.parseJson('{"Name":"v"}')), []);
+});
+
+test("parseIds accepts only what a docker id can be", () => {
+  assert.deepEqual(plain(model.parseIds("e30a359770d8\nrm -rf /\n0123456789ab\n")),
+    ["e30a359770d8", "0123456789ab"]);
+});

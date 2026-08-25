@@ -115,6 +115,32 @@ function parseJsonLines(text) {
   return out
 }
 
+// Whole-document JSON, for commands that answer with one array rather than a
+// record per line: `docker network inspect` and `docker system df -v`.
+function parseJson(text) {
+  var body = stripAnsi(String(text === undefined || text === null ? "" : text))
+    .replace(controlPattern, "").trim()
+  if (body === "") return []
+  try {
+    var parsed = JSON.parse(body)
+    return Array.isArray(parsed) ? parsed : []
+  } catch (e) {
+    return []
+  }
+}
+
+// Accept only what a Docker id can actually be. A daemon that answered with
+// anything else is a daemon we do not pass to a command line.
+function parseIds(text) {
+  var out = []
+  var lines = String(text === undefined || text === null ? "" : text).split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim()
+    if (/^[0-9a-f]{12,64}$/.test(line)) out.push(line)
+  }
+  return out
+}
+
 function shortId(id) {
   return String(id || "").replace(/^sha256:/, "").slice(0, 12)
 }
@@ -162,12 +188,41 @@ function normalizeContainer(raw) {
     project: sanitizeLine(labels["com.docker.compose.project"] || ""),
     service: sanitizeLine(labels["com.docker.compose.service"] || ""),
     ports: normalizePorts(raw.Ports),
+    // Names only. The full Mounts and Networks objects carry host paths and
+    // IPAM detail the panel never shows, and the volumes view only ever asks
+    // "is this one of yours?".
+    mounts: mountNames(raw.Mounts),
+    networks: networkNames(raw.Networks),
     // 0 means "no limit set", which is also what Docker reports for a
     // container that simply inherits the host's memory. Keeping the raw 0
     // is what lets the UI tell "unlimited" from "limited to all of it".
     memoryLimit: positiveNumber(raw.MemoryLimit),
     cpuLimit: positiveNumber(raw.NanoCpus) / 1e9
   }
+}
+
+// A bind mount has no Name, only a host path: it is not a volume and must not
+// make one look used.
+function mountNames(list) {
+  var out = []
+  if (!list || list.length === undefined) return out
+  for (var i = 0; i < list.length; i++) {
+    var mount = list[i]
+    if (!mount || mount.Type !== "volume") continue
+    var name = sanitizeLine(mount.Name || "")
+    if (name !== "" && out.indexOf(name) === -1) out.push(name)
+  }
+  return out
+}
+
+function networkNames(map) {
+  var out = []
+  if (!map || typeof map !== "object") return out
+  for (var key in map) {
+    var name = sanitizeLine(key)
+    if (name !== "" && out.indexOf(name) === -1) out.push(name)
+  }
+  return out
 }
 
 function positiveNumber(value) {
@@ -748,12 +803,175 @@ function composeConfirmText(project, running, total) {
 // Views
 // ---------------------------------------------------------------------------
 
-var views = ["containers", "images", "disk"]
+var views = ["containers", "images", "volumes", "networks", "disk"]
 
 function viewLabel(view) {
   if (view === "images") return "Images"
+  if (view === "volumes") return "Volumes"
+  if (view === "networks") return "Networks"
   if (view === "disk") return "Disk"
   return "Containers"
+}
+
+// ---------------------------------------------------------------------------
+// Volumes and networks
+// ---------------------------------------------------------------------------
+
+// `docker system df` and `docker volume ls` report labels as one flat string,
+// "a=1,b=2", unlike inspect, which returns an object. A label value containing
+// a comma is therefore ambiguous and cannot be recovered — Docker loses that
+// information before Kaj sees it. Only the Compose project name is read here,
+// and Compose does not put commas in it.
+function parseLabelString(value) {
+  var out = {}
+  var text = String(value === undefined || value === null ? "" : value)
+  if (text === "") return out
+  var parts = text.split(",")
+  for (var i = 0; i < parts.length; i++) {
+    var eq = parts[i].indexOf("=")
+    if (eq > 0) out[parts[i].slice(0, eq)] = parts[i].slice(eq + 1)
+  }
+  return out
+}
+
+function normalizeVolume(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var name = sanitizeLine(raw.Name || "")
+  if (name === "") return null
+  var labels = parseLabelString(raw.Labels)
+  return {
+    name: name,
+    size: parseSize(raw.Size),
+    driver: sanitizeLine(raw.Driver || ""),
+    mountpoint: sanitizeLine(raw.Mountpoint || ""),
+    project: sanitizeLine(labels["com.docker.compose.project"] || "")
+  }
+}
+
+function normalizeVolumes(list) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length; i++) {
+    var volume = normalizeVolume(list[i])
+    if (volume) out.push(volume)
+  }
+  out.sort(function (a, b) { return b.size - a.size || a.name.localeCompare(b.name) })
+  return out
+}
+
+// The three networks every daemon has. They cannot be removed and are not
+// interesting to look at, so they are named rather than treated as findings.
+var builtinNetworks = ["bridge", "host", "none"]
+
+function isBuiltinNetwork(name) {
+  return builtinNetworks.indexOf(String(name || "")) !== -1
+}
+
+function normalizeNetwork(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var name = sanitizeLine(raw.Name || "")
+  if (name === "") return null
+  var labels = raw.Labels && typeof raw.Labels === "object" ? raw.Labels : {}
+  return {
+    id: String(raw.Id || ""),
+    name: name,
+    driver: sanitizeLine(raw.Driver || ""),
+    scope: sanitizeLine(raw.Scope || ""),
+    internal: raw.Internal === true,
+    builtin: isBuiltinNetwork(name),
+    subnet: firstSubnet(raw.IPAM),
+    project: sanitizeLine(labels["com.docker.compose.project"] || "")
+  }
+}
+
+function firstSubnet(ipam) {
+  if (!ipam || typeof ipam !== "object") return ""
+  var config = ipam.Config
+  if (!config || config.length === undefined) return ""
+  for (var i = 0; i < config.length; i++) {
+    if (config[i] && config[i].Subnet) return sanitizeLine(config[i].Subnet)
+  }
+  return ""
+}
+
+function normalizeNetworks(list) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length; i++) {
+    var network = normalizeNetwork(list[i])
+    if (network) out.push(network)
+  }
+  // Built-in networks last: they are always present and never actionable.
+  out.sort(function (a, b) {
+    if (a.builtin !== b.builtin) return a.builtin ? 1 : -1
+    return a.name.localeCompare(b.name)
+  })
+  return out
+}
+
+// Usage is derived from the containers Kaj already streams rather than from a
+// second command. `docker volume ls` cannot say what is using a volume, and
+// `docker system df -v` only counts — but more importantly, a separate command
+// is a snapshot: this way a volume stops being unused the moment a container
+// starts, on the same event that redraws the container list.
+function containerVolumeNames(container) {
+  var out = []
+  if (!container) return out
+  var mounts = container.mounts
+  if (!mounts || mounts.length === undefined) return out
+  for (var i = 0; i < mounts.length; i++) {
+    var name = String(mounts[i] || "")
+    if (name !== "" && out.indexOf(name) === -1) out.push(name)
+  }
+  return out
+}
+
+function usersOf(containers, name, pick) {
+  var out = []
+  if (!containers || containers.length === undefined || !name) return out
+  for (var i = 0; i < containers.length; i++) {
+    var names = pick(containers[i])
+    if (names.indexOf(name) !== -1) out.push(containers[i].name)
+  }
+  return out
+}
+
+function volumeUsers(containers, volumeName) {
+  return usersOf(containers, volumeName, containerVolumeNames)
+}
+
+// Only running containers. A stopped container keeps its network in its
+// config, but its endpoint is gone: Docker will remove the network out from
+// under it without complaint, so calling it a member would be a lie. Volumes
+// are the opposite case — `docker volume rm` refuses while any container
+// references one, running or not — so volumeUsers counts them all.
+function networkMembers(containers, networkName) {
+  return usersOf(containers, networkName, function (container) {
+    if (!container || container.running !== true) return []
+    return container.networks && container.networks.length !== undefined
+      ? container.networks : []
+  })
+}
+
+// "unused", or the containers using it, capped so one popular network cannot
+// push everything else off the row.
+function usageLabel(users) {
+  if (!users || users.length === 0) return "unused"
+  if (users.length <= 3) return users.join(", ")
+  return users.slice(0, 3).join(", ") + " +" + (users.length - 3)
+}
+
+function filterByName(list, query) {
+  var needle = String(query || "").trim().toLowerCase()
+  if (!list || list.length === undefined) return []
+  if (needle === "") return list
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    var haystack = (item.name + " " + (item.project || "") + " " + (item.driver || "")).toLowerCase()
+    if (haystack.indexOf(needle) !== -1) out.push(item)
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------

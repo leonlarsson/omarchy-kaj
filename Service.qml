@@ -125,7 +125,7 @@ Item {
   // Each {{json ...}} is encoded by Go, and every key is a literal we wrote, so
   // no container-controlled text can break out of the JSON structure. This is
   // the safe alternative to hand-building JSON in a Go template.
-  readonly property string inspectFormat: '{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"State":{{json .State}},"Labels":{{json .Config.Labels}},"Image":{{json .Config.Image}},"Ports":{{json .NetworkSettings.Ports}},"RestartCount":{{json .RestartCount}},"MemoryLimit":{{json .HostConfig.Memory}},"NanoCpus":{{json .HostConfig.NanoCpus}}}'
+  readonly property string inspectFormat: '{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"State":{{json .State}},"Labels":{{json .Config.Labels}},"Image":{{json .Config.Image}},"Ports":{{json .NetworkSettings.Ports}},"RestartCount":{{json .RestartCount}},"MemoryLimit":{{json .HostConfig.Memory}},"NanoCpus":{{json .HostConfig.NanoCpus}},"Mounts":{{json .Mounts}},"Networks":{{json .NetworkSettings.Networks}}}'
 
   // Counts and severity always come from the full list, never from whatever the
   // panel is currently filtered to, so the bar cannot under-report a problem
@@ -149,13 +149,49 @@ Item {
   // subscription would cost two more processes to show numbers that rarely move.
   property var images: []
   property var disk: []
+  property var volumes: []
+  property var networks: []
   property bool loadingImages: false
+  property bool loadingVolumes: false
+  property bool loadingNetworks: false
 
   function loadImages() {
     if (!daemonReachable || imagesProcess.running) return
     loadingImages = true
     imagesProcess.command = ["docker", "images", "--format", "{{json .}}"]
     imagesProcess.running = true
+  }
+
+  // `docker system df -v` rather than `docker volume ls`, because only df
+  // reports each volume's size. It is the slower of the two on a large daemon,
+  // which is the price of the one column worth having.
+  function loadVolumes() {
+    if (!daemonReachable || volumesProcess.running) return
+    loadingVolumes = true
+    volumesProcess.command = ["docker", "system", "df", "-v", "--format", "{{json .Volumes}}"]
+    volumesProcess.running = true
+  }
+
+  // Two steps for the same reason containers take two: `docker network ls`
+  // knows no subnets, and inspect returns labels as an object instead of the
+  // flat "a=1,b=2" string that cannot survive a comma.
+  function loadNetworks() {
+    if (!daemonReachable || networkIdsProcess.running || networksProcess.running) return
+    loadingNetworks = true
+    networkIdsProcess.command = ["docker", "network", "ls", "--quiet"]
+    networkIdsProcess.running = true
+  }
+
+  function inspectNetworks(ids) {
+    if (ids.length === 0) {
+      networks = []
+      loadingNetworks = false
+      return
+    }
+    var command = ["docker", "network", "inspect"]
+    for (var i = 0; i < ids.length; i++) command.push(ids[i])
+    networksProcess.command = command
+    networksProcess.running = true
   }
 
   function loadDisk() {
@@ -171,6 +207,36 @@ Item {
       onStreamFinished: {
         root.images = Model.normalizeImages(Model.parseJsonLines(text))
         root.loadingImages = false
+      }
+    }
+  }
+
+  Process {
+    id: volumesProcess
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.volumes = Model.normalizeVolumes(Model.parseJson(text))
+        root.loadingVolumes = false
+      }
+    }
+  }
+
+  Process {
+    id: networkIdsProcess
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: root.inspectNetworks(Model.parseIds(text))
+    }
+  }
+
+  Process {
+    id: networksProcess
+    running: false
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.networks = Model.normalizeNetworks(Model.parseJson(text))
+        root.loadingNetworks = false
       }
     }
   }

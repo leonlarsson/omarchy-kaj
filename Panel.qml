@@ -577,7 +577,11 @@ Panel {
               fontFamily: root.contentFontFamily
               enabled: root.reachable
               opacity: enabled ? 1.0 : 0.35
-              onClicked: if (root.kaj) root.kaj.refresh()
+              onClicked: {
+                if (!root.kaj) return
+                root.kaj.refresh()
+                root.loadFor(root.view)
+              }
             }
           }
 
@@ -967,6 +971,152 @@ Panel {
                   horizontalAlignment: Text.AlignRight
                   text: Model.formatBytes(modelData.size)
                   color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+              }
+            }
+          }
+
+          // ---- Volumes -----------------------------------------------------
+
+          Column {
+            width: parent.width
+            spacing: Style.space(8)
+            visible: root.view === "volumes" && root.reachable
+
+            Text {
+              width: parent.width
+              visible: root.kaj && root.kaj.volumes.length === 0
+              text: root.kaj && root.kaj.loadingVolumes ? "Loading…" : "No volumes."
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              textFormat: Text.PlainText
+            }
+
+            Repeater {
+              model: root.view === "volumes" && root.kaj
+                ? Model.filterByName(root.kaj.volumes, root.query) : []
+
+              Row {
+                required property var modelData
+                readonly property var users: root.kaj
+                  ? Model.volumeUsers(root.kaj.containers, modelData.name) : []
+
+                width: parent.width
+                spacing: Style.space(8)
+
+                Column {
+                  width: parent.width - volumeSize.width - Style.space(8)
+                  spacing: Style.space(1)
+
+                  Text {
+                    width: parent.width
+                    text: modelData.name
+                    color: root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+
+                  Text {
+                    width: parent.width
+                    // What is using it, which is the question `docker volume
+                    // ls` cannot answer and the reason to open this view.
+                    text: (modelData.project === "" ? "" : modelData.project + "  ·  ")
+                      + Model.usageLabel(parent.parent.users)
+                    color: parent.parent.users.length === 0 ? Color.accent : root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+                }
+
+                Text {
+                  id: volumeSize
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(62)
+                  horizontalAlignment: Text.AlignRight
+                  text: Model.formatBytes(modelData.size)
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+              }
+            }
+          }
+
+          // ---- Networks ----------------------------------------------------
+
+          Column {
+            width: parent.width
+            spacing: Style.space(8)
+            visible: root.view === "networks" && root.reachable
+
+            Text {
+              width: parent.width
+              visible: root.kaj && root.kaj.networks.length === 0
+              text: root.kaj && root.kaj.loadingNetworks ? "Loading…" : "No networks."
+              color: root.dim
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              textFormat: Text.PlainText
+            }
+
+            Repeater {
+              model: root.view === "networks" && root.kaj
+                ? Model.filterByName(root.kaj.networks, root.query) : []
+
+              Row {
+                required property var modelData
+                readonly property var members: root.kaj
+                  ? Model.networkMembers(root.kaj.containers, modelData.name) : []
+
+                width: parent.width
+                spacing: Style.space(8)
+
+                Column {
+                  width: parent.width - networkDriver.width - Style.space(8)
+                  spacing: Style.space(1)
+
+                  Text {
+                    width: parent.width
+                    text: modelData.name
+                    // The three networks every daemon is born with are context,
+                    // not findings, so they read as muted.
+                    color: modelData.builtin ? root.dim : root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: (modelData.subnet === "" ? "" : modelData.subnet + "  ·  ")
+                      + Model.usageLabel(parent.parent.members)
+                      + (modelData.internal ? "  ·  internal" : "")
+                    color: parent.parent.members.length === 0 && !modelData.builtin
+                      ? Color.accent : root.dim
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+                }
+
+                Text {
+                  id: networkDriver
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(62)
+                  horizontalAlignment: Text.AlignRight
+                  text: modelData.driver
+                  color: root.dim
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
                   textFormat: Text.PlainText
