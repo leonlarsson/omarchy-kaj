@@ -556,8 +556,7 @@ function busyLabel(action) {
     case "restart": return "Restarting…"
     case "pause": return "Pausing…"
     case "unpause": return "Resuming…"
-    case "remove":
-    case "removeVolumes": return "Removing…"
+    case "remove": return "Removing…"
     default: return "Working…"
   }
 }
@@ -706,11 +705,11 @@ function composeBusyLabel(verb) {
   return busyLabel(verb)
 }
 
-// down removes containers and the project network, so it is confirmed.
+// down removes the containers and the project network, so it is confirmed.
+// The network is not named here: it comes back on the next start.
 function composeConfirmText(project, running, total) {
-  return "Run docker compose down on " + project + "? "
-    + total + (total === 1 ? " container" : " containers")
-    + " and the project network are removed. Named volumes are kept."
+  var what = total === 1 ? "its container" : "its " + total + " containers"
+  return "Take down " + project + "? Removes " + what + ". Volumes are kept."
 }
 
 // ---------------------------------------------------------------------------
@@ -1108,22 +1107,19 @@ function availableActions(container, readOnly) {
 // Every mutation passes through here. True means it needs a confirmation.
 // The list is short: friction on start and stop teaches people to click through.
 function isDestructive(action) {
-  return action === "remove" || action === "removeVolumes" || action === "prune"
-    || action === "recreate" || action === "down"
+  return action === "remove" || action === "down"
 }
 
 // Shown in the confirm dialog. Never built from unsanitized container text.
 function confirmText(action, container) {
   var name = container ? container.name : "this container"
-  if (action === "remove") return "Remove " + name + "? The container is deleted. Named volumes are kept."
-  if (action === "removeVolumes") return "Remove " + name + " and its anonymous volumes? Data in those volumes is lost."
-  if (action === "recreate") return "Recreate " + name + "? The current container is replaced."
+  if (action === "remove") {
+    return "Remove " + name + "? Volumes are kept."
+  }
   return "Continue?"
 }
 
 // Verb shown on the confirm button.
 function confirmVerb(action) {
-  if (action === "remove" || action === "removeVolumes") return "Remove"
-  if (action === "recreate") return "Recreate"
-  return "Continue"
+  return action === "remove" ? "Remove" : "Continue"
 }

@@ -322,7 +322,7 @@ Item {
 
     lastError = ""
     // Stopping on purpose must not notify the person who asked.
-    if (action === "stop" || action === "restart" || action === "remove" || action === "removeVolumes") {
+    if (action === "stop" || action === "restart" || action === "remove") {
       markSelfInitiated(container.id)
     }
 
@@ -379,7 +379,6 @@ Item {
       case "pause": return ["docker", "pause", id]
       case "unpause": return ["docker", "unpause", id]
       case "remove": return ["docker", "rm", id]
-      case "removeVolumes": return ["docker", "rm", "--volumes", id]
       default: return null
     }
   }

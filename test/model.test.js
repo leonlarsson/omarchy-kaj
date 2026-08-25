@@ -299,8 +299,7 @@ test("available actions never contradict container state", () => {
 
 test("only genuinely destructive verbs require confirmation", () => {
   assert.ok(model.isDestructive("remove"));
-  assert.ok(model.isDestructive("removeVolumes"));
-  assert.ok(model.isDestructive("prune"));
+  assert.ok(model.isDestructive("down"));
   // Friction on routine verbs is what teaches people to click through the
   // dialog that actually matters.
   assert.ok(!model.isDestructive("stop"));
@@ -308,11 +307,13 @@ test("only genuinely destructive verbs require confirmation", () => {
   assert.ok(!model.isDestructive("start"));
 });
 
-test("confirm text names the container and what is lost", () => {
+test("confirm text names the container, what is lost, and what is kept", () => {
   const c = container({ name: "api" });
-  assert.ok(model.confirmText("remove", c).includes("api"));
-  assert.ok(model.confirmText("remove", c).includes("volumes are kept"));
-  assert.ok(model.confirmText("removeVolumes", c).includes("lost"));
+  const text = model.confirmText("remove", c);
+  assert.ok(text.includes("api"));
+  // docker rm keeps every volume, named or not, so the dialog must not imply
+  // that some of them go.
+  assert.ok(text.includes("Volumes are kept"));
   assert.equal(model.confirmVerb("remove"), "Remove");
 });
 
@@ -490,7 +491,7 @@ test("busyLabel describes the action in progress", () => {
   assert.equal(model.busyLabel("stop"), "Stopping…");
   assert.equal(model.busyLabel("restart"), "Restarting…");
   assert.equal(model.busyLabel("unpause"), "Resuming…");
-  assert.equal(model.busyLabel("removeVolumes"), "Removing…");
+  assert.equal(model.busyLabel("remove"), "Removing…");
   assert.equal(model.busyLabel("mystery"), "Working…");
 });
 
@@ -527,8 +528,7 @@ test("compose down is confirmed and names what goes", () => {
   const text = model.composeConfirmText("shop", 2, 3);
   assert.ok(text.includes("shop"));
   assert.ok(text.includes("3 containers"));
-  assert.ok(text.includes("network"));
-  assert.ok(text.includes("volumes are kept"));
+  assert.ok(text.includes("Volumes are kept"));
 });
 
 // --- Images and disk --------------------------------------------------------
