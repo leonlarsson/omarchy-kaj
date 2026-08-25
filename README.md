@@ -4,7 +4,7 @@ Docker containers in the Omarchy bar.
 
 *Kaj* is Swedish for quay.
 
-![Kaj in the Omarchy bar](screenshot.png)
+![Kaj in the Omarchy bar](preview.png)
 
 ## Install
 
