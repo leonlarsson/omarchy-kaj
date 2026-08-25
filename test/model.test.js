@@ -824,3 +824,29 @@ test("row counts are capped in both parsers", () => {
   // Past the byte budget nothing is parsed at all.
   assert.deepEqual(plain(model.parseIds("x".repeat(model.maxOutputBytes + 1))), []);
 });
+
+test("stats are bounded and follow the snapshot", () => {
+  let map = {};
+  for (let i = 0; i < model.maxStatsEntries + 100; i += 1) {
+    map = model.mergeStats(map, {
+      ID: "c" + String(i).padStart(11, "0"), CPUPerc: "1%", MemUsage: "1MiB / 2MiB"
+    });
+  }
+  // An endpoint inventing ids cannot grow the map without end.
+  assert.equal(Object.keys(map).length, model.maxStatsEntries);
+
+  // Ids the snapshot no longer lists are dropped on the next merge.
+  const kept = model.mergeStats({ aaaaaaaaaaaa: { cpu: 1 }, bbbbbbbbbbbb: { cpu: 2 } },
+    { ID: "cccccccccccc", CPUPerc: "1%", MemUsage: "1MiB / 2MiB" }, ["aaaaaaaaaaaa"]);
+  assert.deepEqual(plain(Object.keys(kept)).sort(), ["aaaaaaaaaaaa", "cccccccccccc"]);
+});
+
+test("inspect runs in batches rather than one giant argv", () => {
+  const ids = Array(250).fill("0123456789ab");
+  assert.deepEqual(plain(model.idBatches(ids).map((b) => b.length)), [100, 100, 50]);
+  assert.deepEqual(plain(model.idBatches([])), []);
+  // Never more than the row cap, however many ids the daemon claims.
+  const flood = Array(model.maxRows + 5000).fill("0123456789ab");
+  const batched = model.idBatches(flood).reduce((n, b) => n + b.length, 0);
+  assert.equal(batched, model.maxRows);
+});

@@ -46,6 +46,44 @@ Item {
   // A producer that runs past its budget is stopped mid-read and its output is
   // dropped. Nothing partial reaches the panel: half a container list is worse
   // than an error saying the list was too large.
+  // Every one-shot command is watched. Quickshell's Process has no timeout of
+  // its own, so a stalled endpoint would keep the pipe open for the life of the
+  // shell: Kaj is keep-loaded, and nothing else would ever close it.
+  property var _watched: []
+
+  function watch(proc, what) {
+    var next = []
+    for (var i = 0; i < _watched.length; i++) {
+      if (_watched[i].proc !== proc) next.push(_watched[i])
+    }
+    next.push({ proc: proc, what: what, due: Date.now() + Model.commandDeadlineMs })
+    _watched = next
+    deadlineTimer.running = true
+  }
+
+  function unwatch(proc) {
+    var next = []
+    for (var i = 0; i < _watched.length; i++) {
+      if (_watched[i].proc !== proc) next.push(_watched[i])
+    }
+    _watched = next
+    if (next.length === 0) deadlineTimer.running = false
+  }
+
+  function enforceDeadlines() {
+    var now = Date.now()
+    var next = []
+    for (var i = 0; i < _watched.length; i++) {
+      var entry = _watched[i]
+      if (entry.due > now) { next.push(entry); continue }
+      entry.proc.running = false
+      lastError = entry.what + " did not answer in time"
+      errorFromAction = false
+    }
+    _watched = next
+    if (next.length === 0) deadlineTimer.running = false
+  }
+
   function refuseOversized(proc, what) {
     proc.running = false
     lastError = what + " returned more data than Kaj will read"
@@ -56,6 +94,14 @@ Item {
   function clearError() {
     lastError = ""
     errorFromAction = false
+  }
+
+  // The ids the last snapshot listed. Stats for anything else are dropped, so
+  // an endpoint inventing ids cannot grow the map.
+  readonly property var knownShortIds: {
+    var out = []
+    for (var i = 0; i < containers.length; i++) out.push(containers[i].shortId)
+    return out
   }
 
   function containerById(id) {
@@ -77,6 +123,7 @@ Item {
   function probe() {
     probing = true
     whichProcess.command = ["which", "docker"]
+    watch(whichProcess, "docker")
     whichProcess.running = true
   }
 
@@ -86,6 +133,7 @@ Item {
     if (!dockerInstalled) return
     if (pingProcess.running) return
     pingProcess.command = ["docker", "version", "--format", "{{.Server.Version}}"]
+    watch(pingProcess, "docker version")
     pingProcess.running = true
   }
 
@@ -95,23 +143,40 @@ Item {
     if (!dockerInstalled || !daemonReachable) return
     if (idsProcess.running || inspectProcess.running) return
     idsProcess.command = ["docker", "ps", "-a", "--no-trunc", "--quiet"]
+    watch(idsProcess, "docker ps")
     idsProcess.running = true
   }
 
   property var _pendingIds: []
   property string _idsBuffer: ""
-  property string _inspectBuffer: ""
+
+  // Inspect runs in batches. One call carrying every id is a command line whose
+  // length depends on how many containers the endpoint claims to have.
+  property var _pendingBatches: []
+  property var _collected: []
 
   function inspectIds(ids) {
     if (!Array.isArray(ids) || ids.length === 0) {
       applyContainers([])
       return
     }
-    // Ids are hex, but they are still passed as separate argv entries.
+    _pendingBatches = Model.idBatches(ids)
+    _collected = []
+    runNextBatch()
+  }
+
+  function runNextBatch() {
+    if (_pendingBatches.length === 0) {
+      applyContainers(Model.normalizeContainers(_collected))
+      _collected = []
+      return
+    }
+    var batch = _pendingBatches[0]
+    _pendingBatches = _pendingBatches.slice(1)
     var command = ["docker", "inspect", "--type", "container", "--format", inspectFormat]
-    for (var i = 0; i < ids.length; i++) command.push(ids[i])
-    _inspectBuffer = ""
+    for (var i = 0; i < batch.length; i++) command.push(batch[i])
     inspectProcess.command = command
+    watch(inspectProcess, "docker inspect")
     inspectProcess.running = true
   }
 
@@ -150,6 +215,7 @@ Item {
     if (!daemonReachable || imagesProcess.running) return
     loadingImages = true
     imagesProcess.command = ["docker", "images", "--format", "{{json .}}"]
+    watch(imagesProcess, "docker images")
     imagesProcess.running = true
   }
 
@@ -158,6 +224,7 @@ Item {
     if (!daemonReachable || volumesProcess.running) return
     loadingVolumes = true
     volumesProcess.command = ["docker", "system", "df", "-v", "--format", "{{json .Volumes}}"]
+    watch(volumesProcess, "docker system df")
     volumesProcess.running = true
   }
 
@@ -167,6 +234,7 @@ Item {
     if (!daemonReachable || networkIdsProcess.running || networksProcess.running) return
     loadingNetworks = true
     networkIdsProcess.command = ["docker", "network", "ls", "--quiet"]
+    watch(networkIdsProcess, "docker network ls")
     networkIdsProcess.running = true
   }
 
@@ -179,18 +247,21 @@ Item {
     var command = ["docker", "network", "inspect"]
     for (var i = 0; i < ids.length; i++) command.push(ids[i])
     networksProcess.command = command
+    watch(networksProcess, "docker network inspect")
     networksProcess.running = true
   }
 
   function loadDisk() {
     if (!daemonReachable || diskProcess.running) return
     diskProcess.command = ["docker", "system", "df", "--format", "{{json .}}"]
+    watch(diskProcess, "docker system df")
     diskProcess.running = true
   }
 
   Process {
     id: imagesProcess
     running: false
+    onExited: root.unwatch(imagesProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(imagesProcess, "docker images")
@@ -205,6 +276,7 @@ Item {
   Process {
     id: volumesProcess
     running: false
+    onExited: root.unwatch(volumesProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(volumesProcess, "docker system df")
@@ -219,6 +291,7 @@ Item {
   Process {
     id: networkIdsProcess
     running: false
+    onExited: root.unwatch(networkIdsProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(networkIdsProcess, "docker network ls")
@@ -230,6 +303,7 @@ Item {
   Process {
     id: networksProcess
     running: false
+    onExited: root.unwatch(networksProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(networksProcess, "docker network inspect")
@@ -244,6 +318,7 @@ Item {
   Process {
     id: diskProcess
     running: false
+    onExited: root.unwatch(diskProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(diskProcess, "docker system df")
@@ -270,6 +345,7 @@ Item {
     envProcess.containerId = container.id
     envProcess.command = ["docker", "inspect", "--type", "container",
                           "--format", "{{json .Config.Env}}", container.id]
+    watch(envProcess, "docker inspect")
     envProcess.running = true
   }
 
@@ -284,6 +360,7 @@ Item {
     id: envProcess
     property string containerId: ""
     running: false
+    onExited: root.unwatch(envProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(envProcess, "docker inspect")
@@ -482,6 +559,7 @@ Item {
   Process {
     id: whichProcess
     running: false
+    onExited: root.unwatch(whichProcess)
     stdout: StdioCollector {
       onStreamFinished: {
         root.dockerInstalled = String(text || "").trim() !== ""
@@ -507,6 +585,7 @@ Item {
     }
 
     onExited: function (exitCode) {
+      root.unwatch(pingProcess)
       var reachable = exitCode === 0 && pingProcess.version !== ""
       var became = reachable && !root.daemonReachable
       root.daemonReachable = reachable
@@ -532,6 +611,7 @@ Item {
   Process {
     id: idsProcess
     running: false
+    onExited: root.unwatch(idsProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(idsProcess, "docker ps")
@@ -549,12 +629,17 @@ Item {
   Process {
     id: inspectProcess
     running: false
+    onExited: root.unwatch(inspectProcess)
     stdout: StdioCollector {
       onDataChanged: {
         if (Model.overBudget(text)) root.refuseOversized(inspectProcess, "docker inspect")
       }
       onStreamFinished: {
-        root.applyContainers(Model.normalizeContainers(Model.parseJsonLines(text)))
+        var rows = Model.parseJsonLines(text)
+        for (var i = 0; i < rows.length && root._collected.length < Model.maxRows; i++) {
+          root._collected.push(rows[i])
+        }
+        root.runNextBatch()
       }
     }
     // Diagnostics are bounded too: stderr is read for one line, and a daemon
@@ -638,13 +723,20 @@ Item {
         if (Model.overBudget(line, Model.maxStreamLineBytes)) return
         var parsed = Model.parseJsonLines(line)
         for (var i = 0; i < parsed.length; i++) {
-          root.statsById = Model.mergeStats(root.statsById, parsed[i])
+          root.statsById = Model.mergeStats(root.statsById, parsed[i], root.knownShortIds)
         }
       }
     }
   }
 
+  // Events arrive in bursts and a burst is fine. Past the ceiling the rest of
+  // the window is dropped: the reconcile timer still corrects the panel, so a
+  // flood costs accuracy for a second rather than the shell's main thread.
+  property int _eventsThisWindow: 0
+
   function handleEvent(line) {
+    if (_eventsThisWindow >= Model.maxEventsPerWindow) return
+    _eventsThisWindow++
     var events = Model.parseJsonLines(line)
     for (var i = 0; i < events.length; i++) {
       var event = events[i]
@@ -721,6 +813,37 @@ Item {
     interval: 250
     repeat: false
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: eventWindowTimer
+    interval: Model.eventWindowMs
+    repeat: true
+    running: root.daemonReachable
+    onTriggered: root._eventsThisWindow = 0
+  }
+
+  // A stream is read line by line, and a record with no newline never reaches
+  // that guard: it sits in the parser's buffer growing. Kaj cannot see that
+  // buffer, so it bounds the process instead and starts a fresh one.
+  Timer {
+    id: streamRecycleTimer
+    interval: 600000
+    repeat: true
+    running: root.daemonReachable
+    onTriggered: {
+      eventsProcess.running = false
+      statsProcess.running = false
+      root.startStreams()
+    }
+  }
+
+  Timer {
+    id: deadlineTimer
+    interval: 1000
+    repeat: true
+    running: false
+    onTriggered: root.enforceDeadlines()
   }
 
   Timer {

@@ -100,8 +100,11 @@ long-lived shell process, so:
   stripped.
 - Environment variables load only for the row you expand and stay hidden until
   you click them. Kaj does not try to guess which keys are secret.
-- Every producer is read against a byte and row budget. A command that returns
-  more than that is stopped mid-read and its output is dropped.
+- Every producer is read against a byte and row budget, and against a deadline.
+  A command that returns too much, or does not answer in time, is stopped
+  mid-read and its output is dropped. Inspect runs in batches rather than one
+  command line per container, live stats are keyed only to containers the last
+  snapshot listed, and events are capped per second.
 - Kaj never calls `sudo` or `pkexec`.
 
 [Rootless Docker](https://docs.docker.com/engine/security/rootless/) avoids the

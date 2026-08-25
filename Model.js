@@ -84,6 +84,20 @@ var maxOutputBytes = 4 * 1024 * 1024
 var maxStreamLineBytes = 64 * 1024
 var maxRows = 2000
 var maxErrorBytes = 64 * 1024
+// A command that has not finished by now is not going to. Kaj is keep-loaded,
+// so a stalled endpoint would otherwise hold the process open for the life of
+// the shell.
+var commandDeadlineMs = 15000
+// Ids per inspect call. Every id is its own argv entry, and one call carrying
+// thousands of them is a command line the kernel may refuse outright.
+var maxIdsPerInspect = 100
+// Stats are keyed by whatever ids the daemon reports. The map is capped so an
+// endpoint inventing ids cannot grow it without end.
+var maxStatsEntries = 500
+// Events arrive in bursts, and a burst is fine. A daemon emitting faster than
+// this for a whole window is not something Kaj keeps up with.
+var maxEventsPerWindow = 200
+var eventWindowMs = 1000
 
 function overBudget(text, limit) {
   return str(text).length > (limit === undefined ? maxOutputBytes : limit)
@@ -373,14 +387,33 @@ function cpuPressure(container, stats) {
 }
 
 // Stats arrive keyed by short id. Fold them into a lookup the UI can index.
-function mergeStats(existing, raw) {
+function mergeStats(existing, raw, knownIds) {
   var out = {}
+  var known = knownIds && knownIds.length !== undefined ? knownIds : null
   if (existing && typeof existing === "object") {
     var keys = Object.keys(existing)
-    for (var i = 0; i < keys.length; i++) out[keys[i]] = existing[keys[i]]
+    for (var i = 0; i < keys.length; i++) {
+      // Drop stats for containers the snapshot no longer lists, so ids the
+      // daemon stops reporting cannot accumulate.
+      if (known && known.indexOf(keys[i]) === -1) continue
+      out[keys[i]] = existing[keys[i]]
+    }
   }
   var stat = normalizeStat(raw)
-  if (stat) out[stat.shortId] = stat
+  if (!stat) return out
+  if (out[stat.shortId] === undefined && Object.keys(out).length >= maxStatsEntries) return out
+  out[stat.shortId] = stat
+  return out
+}
+
+// Splits an id list into command lines that stay a sane length.
+function idBatches(ids, size) {
+  var limit = size === undefined ? maxIdsPerInspect : size
+  var out = []
+  if (!ids || ids.length === undefined) return out
+  for (var i = 0; i < ids.length && i < maxRows; i += limit) {
+    out.push(ids.slice(i, i + limit))
+  }
   return out
 }
 
