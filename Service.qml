@@ -43,6 +43,16 @@ Item {
     ? (daemonReachable ? Model.barSummary(containers) : "Docker daemon not running")
     : "Docker not installed"
 
+  // A producer that runs past its budget is stopped mid-read and its output is
+  // dropped. Nothing partial reaches the panel: half a container list is worse
+  // than an error saying the list was too large.
+  function refuseOversized(proc, what) {
+    proc.running = false
+    lastError = what + " returned more data than Kaj will read"
+    errorFromAction = false
+    return true
+  }
+
   function clearError() {
     lastError = ""
     errorFromAction = false
@@ -182,6 +192,9 @@ Item {
     id: imagesProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(imagesProcess, "docker images")
+      }
       onStreamFinished: {
         root.images = Model.normalizeImages(Model.parseJsonLines(text))
         root.loadingImages = false
@@ -193,6 +206,9 @@ Item {
     id: volumesProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(volumesProcess, "docker system df")
+      }
       onStreamFinished: {
         root.volumes = Model.normalizeVolumes(Model.parseJson(text))
         root.loadingVolumes = false
@@ -204,6 +220,9 @@ Item {
     id: networkIdsProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(networkIdsProcess, "docker network ls")
+      }
       onStreamFinished: root.inspectNetworks(Model.parseIds(text))
     }
   }
@@ -212,6 +231,9 @@ Item {
     id: networksProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(networksProcess, "docker network inspect")
+      }
       onStreamFinished: {
         root.networks = Model.normalizeNetworks(Model.parseJson(text))
         root.loadingNetworks = false
@@ -223,6 +245,9 @@ Item {
     id: diskProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(diskProcess, "docker system df")
+      }
       onStreamFinished: root.disk = Model.normalizeDisk(Model.parseJsonLines(text))
     }
   }
@@ -260,6 +285,9 @@ Item {
     property string containerId: ""
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(envProcess, "docker inspect")
+      }
       onStreamFinished: {
         if (envProcess.containerId !== root.wantedEnvId) return
         var rows = Model.parseJsonLines(text)
@@ -369,6 +397,7 @@ Item {
       property string failure: ""
 
       stderr: StdioCollector {
+        onDataChanged: if (Model.overBudget(text, Model.maxErrorBytes)) proc.running = false
         onStreamFinished: proc.failure = Model.firstRealError(text)
       }
 
@@ -504,6 +533,9 @@ Item {
     id: idsProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(idsProcess, "docker ps")
+      }
       onStreamFinished: {
         var ids = String(text || "").split("\n").filter(function (line) {
           // Accept only valid container ids.
@@ -518,11 +550,19 @@ Item {
     id: inspectProcess
     running: false
     stdout: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text)) root.refuseOversized(inspectProcess, "docker inspect")
+      }
       onStreamFinished: {
         root.applyContainers(Model.normalizeContainers(Model.parseJsonLines(text)))
       }
     }
+    // Diagnostics are bounded too: stderr is read for one line, and a daemon
+    // that floods it is cut off rather than buffered.
     stderr: StdioCollector {
+      onDataChanged: {
+        if (Model.overBudget(text, Model.maxErrorBytes)) inspectProcess.running = false
+      }
       onStreamFinished: {
         // Containers removed between the two commands are expected.
         var message = Model.firstRealError(text)
@@ -572,8 +612,13 @@ Item {
   Process {
     id: eventsProcess
     running: false
+    // Streams are read line by line, so the guard is per line: an event or a
+    // stats record larger than the cap is dropped rather than parsed.
     stdout: SplitParser {
-      onRead: function (line) { root.handleEvent(line) }
+      onRead: function (line) {
+        if (Model.overBudget(line, Model.maxStreamLineBytes)) return
+        root.handleEvent(line)
+      }
     }
     onExited: function () {
       // A daemon restart ends the stream. Re-probe instead of going stale.
@@ -590,6 +635,7 @@ Item {
     onExited: root.statsRestartTimer.restart()
     stdout: SplitParser {
       onRead: function (line) {
+        if (Model.overBudget(line, Model.maxStreamLineBytes)) return
         var parsed = Model.parseJsonLines(line)
         for (var i = 0; i < parsed.length; i++) {
           root.statsById = Model.mergeStats(root.statsById, parsed[i])

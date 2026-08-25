@@ -76,12 +76,26 @@ function envEntries(list) {
 
 // Docker writes one JSON object per line. Bad lines are skipped.
 // Escapes are stripped first: docker stats writes cursor codes around each record.
+// Budgets. Docker's output is bounded by what the daemon holds, not by
+// anything Kaj controls, so every producer is read against a limit and refused
+// when it runs past. A daemon that answers with 200 MB is a daemon we stop
+// reading, not one we hand to QML.
+var maxOutputBytes = 4 * 1024 * 1024
+var maxStreamLineBytes = 64 * 1024
+var maxRows = 2000
+var maxErrorBytes = 64 * 1024
+
+function overBudget(text, limit) {
+  return str(text).length > (limit === undefined ? maxOutputBytes : limit)
+}
+
 function parseJsonLines(text) {
   var out = []
   var lines = stripAnsi(str(text)).split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].replace(controlPattern, "").trim()
     if (line === "") continue
+    if (out.length >= maxRows) break
     try {
       var parsed = JSON.parse(line)
       if (parsed && typeof parsed === "object") out.push(parsed)
@@ -99,7 +113,8 @@ function parseJson(text) {
   if (body === "") return []
   try {
     var parsed = JSON.parse(body)
-    return Array.isArray(parsed) ? parsed : []
+    if (!Array.isArray(parsed)) return []
+    return parsed.length > maxRows ? parsed.slice(0, maxRows) : parsed
   } catch (e) {
     return []
   }
@@ -108,9 +123,11 @@ function parseJson(text) {
 // Accept only valid Docker ids. Anything else never reaches a command line.
 function parseIds(text) {
   var out = []
+  if (overBudget(text)) return out
   var lines = str(text).split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim()
+    if (out.length >= maxRows) break
     if (/^[0-9a-f]{12,64}$/.test(line)) out.push(line)
   }
   return out

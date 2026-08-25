@@ -802,3 +802,25 @@ test("the problems filter lists only what needs acting on", () => {
   const problems = model.filterContainers(list, "", "problems").map((c) => c.name);
   assert.deepEqual(plain(problems), ["crashed", "looping"]);
 });
+
+test("output is read against a budget", () => {
+  // Docker's output is bounded by the daemon, not by Kaj, so every producer is
+  // read against a limit and refused past it.
+  assert.equal(model.overBudget("small"), false);
+  assert.equal(model.overBudget("x".repeat(model.maxOutputBytes + 1)), true);
+  assert.equal(model.overBudget("x".repeat(100), 50), true);
+  assert.equal(model.overBudget(null), false);
+});
+
+test("row counts are capped in both parsers", () => {
+  const lines = Array(model.maxRows + 500).fill('{"Id":"a"}').join("\n");
+  assert.equal(model.parseJsonLines(lines).length, model.maxRows);
+
+  const array = JSON.stringify(Array(model.maxRows + 500).fill({ Name: "v" }));
+  assert.equal(model.parseJson(array).length, model.maxRows);
+
+  const ids = Array(model.maxRows + 500).fill("0123456789ab").join("\n");
+  assert.equal(model.parseIds(ids).length, model.maxRows);
+  // Past the byte budget nothing is parsed at all.
+  assert.deepEqual(plain(model.parseIds("x".repeat(model.maxOutputBytes + 1))), []);
+});
