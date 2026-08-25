@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mozzy.kaj",
   "name": "Kaj",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Leon San Jos\u00e9 Larsson",
   "license": "MIT",
   "description": "Docker containers in the Omarchy bar: live status, stats, logs, and controls, grouped by Compose project.",
