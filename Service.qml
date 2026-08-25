@@ -233,9 +233,16 @@ Item {
   // Fetched only when a row is expanded, and dropped when it collapses.
   // The main snapshot never carries Env.
   property var envById: ({})
+  // The row the user is waiting on. A result for anything else is dropped, so
+  // an environment fetched for a row that has since closed is never kept.
+  property string wantedEnvId: ""
 
   function loadEnv(container) {
-    if (!container || envProcess.running) return
+    if (!container || !Model.isValidId(container.id)) return
+    // A second expand while the first is still running used to be dropped, and
+    // the new row waited for a result that never came.
+    wantedEnvId = container.id
+    if (envProcess.running) envProcess.running = false
     envProcess.containerId = container.id
     envProcess.command = ["docker", "inspect", "--type", "container",
                           "--format", "{{json .Config.Env}}", container.id]
@@ -243,6 +250,7 @@ Item {
   }
 
   function forgetEnv(id) {
+    if (String(id) === wantedEnvId) wantedEnvId = ""
     var next = ({})
     for (var key in envById) if (key !== String(id)) next[key] = envById[key]
     envById = next
@@ -254,6 +262,7 @@ Item {
     running: false
     stdout: StdioCollector {
       onStreamFinished: {
+        if (envProcess.containerId !== root.wantedEnvId) return
         var rows = Model.parseJsonLines(text)
         var next = ({})
         for (var key in root.envById) next[key] = root.envById[key]
@@ -371,7 +380,7 @@ Item {
   // Maps a verb to argv. The container id is always its own argv entry.
   function commandFor(action, container) {
     var id = container.id
-    if (id === "") return null
+    if (!Model.isValidId(id)) return null
     switch (action) {
       case "start": return ["docker", "start", id]
       case "stop": return ["docker", "stop", id]
@@ -387,7 +396,7 @@ Item {
   // Logs and shells open in a terminal, not in the panel. A popup is the wrong
   // place for a long session, and a terminal renders the bytes, not Kaj.
   function openLogs(container) {
-    if (!container) return
+    if (!container || !Model.isValidId(container.id)) return
     Quickshell.execDetached([
       "omarchy-launch-terminal",
       "docker", "logs", "--follow", "--tail", String(logLines), container.id
@@ -398,6 +407,7 @@ Item {
   // which can change more than any button here.
   function openShell(container) {
     if (!container || !container.running) return
+    if (!Model.isValidId(container.id)) return
     if (readOnly) { lastError = "Read-only mode is on"; return }
     Quickshell.execDetached([
       "omarchy-launch-terminal",
@@ -573,6 +583,9 @@ Item {
   Process {
     id: statsProcess
     running: false
+    // The events stream re-probes the daemon when it dies, but stats can end on
+    // its own, and nothing else would notice that the numbers had stopped.
+    onExited: root.statsRestartTimer.restart()
     stdout: SplitParser {
       onRead: function (line) {
         var parsed = Model.parseJsonLines(line)
@@ -641,14 +654,15 @@ Item {
 
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
     // Normal urgency. Critical is sticky in most daemons and must be dismissed.
-    notify("Container exited", name + " exited with code " + exitCode, "normal")
+    notify("Container exited", Model.notificationText(name) + " exited with code " + exitCode, "normal")
   }
 
   // Out of memory earns critical. It is rare, unasked for, and easy to miss.
   function announceOom(event) {
     var attributes = event.Actor && event.Actor.Attributes ? event.Actor.Attributes : {}
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
-    notify("Container out of memory", name + " was killed for exceeding its memory limit", "critical")
+    notify("Container out of memory",
+      Model.notificationText(name) + " was killed for exceeding its memory limit", "critical")
   }
 
   // ---- Timers --------------------------------------------------------------
@@ -659,6 +673,13 @@ Item {
     interval: 250
     repeat: false
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: statsRestartTimer
+    interval: 3000
+    repeat: false
+    onTriggered: root.syncStatsStream()
   }
 
   Timer {

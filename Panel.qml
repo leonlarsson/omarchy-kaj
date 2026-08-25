@@ -421,6 +421,7 @@ Panel {
             color: Color.accent
             font.family: root.contentFontFamily
             font.pixelSize: Style.space(36)
+            textFormat: Text.PlainText
           }
 
           Column {

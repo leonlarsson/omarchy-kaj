@@ -714,3 +714,23 @@ test("read-only leaves only the actions that can run", () => {
   assert.deepEqual(plain(model.availableActions(running, false)),
     ["stop", "restart", "pause", "logs", "shell"]);
 });
+
+test("ids are checked before they reach a command line", () => {
+  assert.equal(model.isValidId("0123456789ab"), true);
+  assert.equal(model.isValidId("a".repeat(64)), true);
+  assert.equal(model.isValidId("a".repeat(65)), false);
+  assert.equal(model.isValidId("z".repeat(64)), false);
+  // Kaj honours DOCKER_HOST, so the daemon is not automatically trusted.
+  assert.equal(model.isValidId("--privileged"), false);
+  assert.equal(model.isValidId("-rf /"), false);
+  assert.equal(model.isValidId("short"), false);
+  assert.equal(model.isValidId(""), false);
+  assert.equal(model.isValidId(null), false);
+});
+
+test("notification text cannot carry markup", () => {
+  // Notification daemons render the body as styled text.
+  assert.equal(model.notificationText("<b>api</b>"), "&lt;b&gt;api&lt;/b&gt;");
+  assert.equal(model.notificationText("a & b"), "a &amp; b");
+  assert.equal(model.notificationText("api"), "api");
+});

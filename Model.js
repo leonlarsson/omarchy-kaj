@@ -116,6 +116,13 @@ function parseIds(text) {
   return out
 }
 
+// Ids reach a command line, so they are checked against what Docker can
+// return. Kaj honours DOCKER_HOST, and a hostile endpoint could answer with an
+// id like "--privileged" that argv position alone would not make safe.
+function isValidId(id) {
+  return /^[0-9a-f]{12,64}$/.test(str(id))
+}
+
 function shortId(id) {
   return String(id || "").replace(/^sha256:/, "").slice(0, 12)
 }
@@ -1021,6 +1028,13 @@ function statusSummary(container, nowMs) {
   // Unhealthy keeps its uptime: how long it has failed is what you want to know.
   if (container.health === "unhealthy") return "Unhealthy" + (uptime ? " · up " + uptime : "")
   return uptime ? "Up " + uptime : "Running"
+}
+
+// Notification daemons render the body as styled text, so markup is escaped
+// here. Docker forbids these characters in a container name, which makes this
+// a guard against the next caller rather than against today's.
+function notificationText(text) {
+  return sanitizeLine(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 // Bar tooltip: one line, no per-container detail.
