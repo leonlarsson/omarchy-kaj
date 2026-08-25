@@ -126,8 +126,34 @@ Panel {
     if (cursorIndex < 0) cursorActive = false
   }
 
+  // Last input wins. The keyboard claims the cursor until the pointer moves
+  // again; without that, a mouse resting over the list dragged the selection
+  // back on every stray nudge.
+  property bool keyboardDrivingCursor: false
+
+  property var lastPointer: null
+
+  function notePointerMoved(scenePos, id) {
+    if (lastPointer
+        && Math.abs(scenePos.x - lastPointer.x) < 1
+        && Math.abs(scenePos.y - lastPointer.y) < 1) return
+    lastPointer = Qt.point(scenePos.x, scenePos.y)
+    keyboardDrivingCursor = false
+    selectByHover(id)
+  }
+
+  function selectByHover(id) {
+    if (keyboardDrivingCursor) return
+    var index = Model.cursorIndexForId(flatContainers, id, -1)
+    if (index < 0) return
+    cursorActive = true
+    cursorIndex = index
+    cursorId = id
+  }
+
   function moveCursorBy(delta) {
     if (flatContainers.length === 0) return
+    keyboardDrivingCursor = true
     cursorActive = true
     cursorIndex = Model.moveCursor(cursorIndex, delta, flatContainers.length)
     cursorId = cursorContainer ? cursorContainer.id : ""
@@ -154,6 +180,7 @@ Panel {
     cursorIndex = -1
     cursorId = ""
     cursorActive = false
+    keyboardDrivingCursor = false
     panelFlick.contentY = 0
   }
 
@@ -1002,7 +1029,15 @@ Panel {
                   hasCursor: root.cursorContainer
                     && root.cursorContainer.id === modelData.id
 
-                  onHasCursorChanged: if (hasCursor) root.ensureVisible(containerRow)
+                  // Only the keyboard scrolls the list. Doing it on hover
+                  // would move rows out from under the pointer.
+                  onHasCursorChanged: {
+                    if (hasCursor && root.keyboardDrivingCursor) root.ensureVisible(containerRow)
+                  }
+                  onHoverSelected: root.selectByHover(modelData.id)
+                  onPointerMoved: function (scenePos) {
+                    root.notePointerMoved(scenePos, modelData.id)
+                  }
                   onActionRequested: function (action) { root.requestAction(action, container) }
                 }
               }

@@ -42,7 +42,9 @@ Item {
   // Stats and actions share one right-anchored slot, so both sit at the same edge
   // on every row.
   readonly property real rightReserve: Style.space(150)
-  readonly property bool actionsShown: hasCursor || rowHover.hovered || busy || expanded
+  // Hover selects, so the cursor is the only thing that lights a row. Showing
+  // buttons or a tint on hover as well left two rows looking active at once.
+  readonly property bool actionsShown: hasCursor || busy || expanded
 
   readonly property color severityColor: {
     if (severity === "error") return Color.urgent
@@ -54,6 +56,8 @@ Item {
     + (expanded ? envBlock.implicitHeight + Style.space(8) : 0)
 
   signal revealToggled(string key)
+  signal hoverSelected()
+  signal pointerMoved(var scenePos)
 
   Rectangle {
     anchors.left: parent.left
@@ -63,7 +67,7 @@ Item {
     radius: Style.cornerRadius
     color: row.hasCursor
       ? Style.selectedFillFor(row.foreground, Color.accent)
-      : (rowHover.hovered ? Util.alpha(row.foreground, 0.06) : "transparent")
+      : "transparent"
     Behavior on color { ColorAnimation { duration: 90 } }
 
     // An accent bar on the selected row, so the cursor is legible in any theme.
@@ -150,6 +154,15 @@ Item {
   // MouseArea, so buttons under the pointer made the row flicker.
   HoverHandler {
     id: rowHover
+    // The pointer arriving on a row is a request to select it. The panel
+    // decides whether to honour it: it ignores hover while the keyboard is
+    // driving, so a resting mouse cannot pull the cursor back.
+    onHoveredChanged: if (hovered) row.hoverSelected()
+    // Scene position, not local: when the keyboard scrolls the list, rows move
+    // under a still pointer and its local position changes. Reading that as
+    // mouse movement handed the cursor straight back to hover, which pinned
+    // the selection to whatever the mouse happened to rest on.
+    onPointChanged: if (hovered) row.pointerMoved(point.scenePosition)
   }
 
   Row {
