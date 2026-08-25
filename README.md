@@ -12,7 +12,11 @@ Docker containers in the Omarchy bar.
 omarchy plugin add https://github.com/leonlarsson/omarchy-kaj.git --enable
 ```
 
-Requires the `docker` CLI and a reachable daemon.
+Requires the `docker` CLI and a reachable daemon. To remove it:
+
+```bash
+omarchy plugin remove mozzy.kaj
+```
 
 Optionally bind the panel to a key:
 
