@@ -888,3 +888,19 @@ test("timestamp maps keep the newest entries and drop the rest", () => {
   assert.ok(pruned["id" + (model.maxNotifiedEntries + 49)] !== undefined);
   assert.equal(pruned.id0, undefined);
 });
+
+test("nested traversal stops, it does not merely stop collecting", () => {
+  // An array of a million entries that none of them qualify still costs a
+  // million iterations if only the output is capped.
+  const binds = Array(200000).fill({ Type: "bind", Source: "/x" });
+  const started = Date.now();
+  assert.deepEqual(plain(model.mountNames(binds)), []);
+  assert.ok(Date.now() - started < 50, "mountNames must not walk the whole array");
+});
+
+test("a single oversized record is dropped", () => {
+  const fat = JSON.stringify({ Id: "b".repeat(12), pad: "y".repeat(model.maxRecordBytes) });
+  const rows = model.parseJsonLines(JSON.stringify({ Id: "a".repeat(12) }) + "\n" + fat);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].Id, "a".repeat(12));
+});

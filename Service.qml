@@ -51,12 +51,13 @@ Item {
   // shell: Kaj is keep-loaded, and nothing else would ever close it.
   property var _watched: []
 
-  function watch(proc, what) {
+  function watch(proc, what, deadlineMs) {
     var next = []
     for (var i = 0; i < _watched.length; i++) {
       if (_watched[i].proc !== proc) next.push(_watched[i])
     }
-    next.push({ proc: proc, what: what, due: Date.now() + Model.commandDeadlineMs })
+    var allowed = deadlineMs === undefined ? Model.commandDeadlineMs : deadlineMs
+    next.push({ proc: proc, what: what, due: Date.now() + allowed })
     _watched = next
     deadlineTimer.running = true
   }
@@ -446,6 +447,7 @@ Item {
     })
     if (!proc) { lastError = "Could not run compose " + verb; return }
     setBusy(key, verb)
+    watch(proc, "docker compose " + verb, Model.actionDeadlineMs)
     proc.running = true
   }
 
@@ -478,6 +480,7 @@ Item {
       return
     }
     setBusy(container.id, action)
+    watch(proc, "docker " + action, Model.actionDeadlineMs)
     proc.running = true
   }
 
@@ -508,7 +511,11 @@ Item {
       }
 
       onExited: function (exitCode) {
+        root.unwatch(proc)
         root.finishAction(proc.containerId, proc.verb, exitCode === 0 ? "" : proc.failure)
+        // Actions are created per click, so their bookkeeping is cleared with
+        // them rather than left behind keyed to a destroyed object.
+        root.markRefused(proc, false)
         proc.destroy()
       }
     }
@@ -883,6 +890,10 @@ Item {
 
   // Out of memory earns critical. It is rare, unasked for, and easy to miss.
   function announceOom(event) {
+    // Through the same gate as every other notification. Being the most
+    // important message Kaj sends is not a reason to be the one that can be
+    // sent two hundred times a second.
+    if (!shouldNotify(event.id)) return
     var attributes = event.Actor && event.Actor.Attributes ? event.Actor.Attributes : {}
     var name = Model.sanitizeLine(attributes.name || Model.shortId(event.id), 80)
     notify("Container out of memory",

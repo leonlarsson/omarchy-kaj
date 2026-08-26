@@ -82,6 +82,10 @@ function envEntries(list) {
 // reading, not one we hand to QML.
 var maxOutputBytes = 4 * 1024 * 1024
 var maxStreamLineBytes = 64 * 1024
+// One record. A snapshot can sit under the total budget and still carry a
+// single container whose nested values are enormous, and enumerating an object
+// that large costs real time however few of its keys Kaj keeps.
+var maxRecordBytes = 256 * 1024
 var maxRows = 2000
 var maxErrorBytes = 64 * 1024
 // A command that has not finished by now is not going to. Kaj is keep-loaded,
@@ -106,6 +110,10 @@ var maxStatsPerWindow = 200
 var maxNestedItems = 100
 // Ids remembered for notification cooldowns.
 var maxNotifiedEntries = 200
+// Actions get a longer deadline than snapshots: docker stop waits ten seconds
+// for SIGTERM before SIGKILL, and compose down waits for each container in
+// turn. Long, but not forever.
+var actionDeadlineMs = 120000
 // A long-lived stream's collector keeps everything it has read, so the process
 // is recycled once its buffer reaches this size.
 var maxStreamBufferBytes = 1024 * 1024
@@ -121,6 +129,7 @@ function parseJsonLines(text) {
     var line = lines[i].replace(controlPattern, "").trim()
     if (line === "") continue
     if (out.length >= maxRows) break
+    if (line.length > maxRecordBytes) continue
     try {
       var parsed = JSON.parse(line)
       if (parsed && typeof parsed === "object") out.push(parsed)
@@ -227,7 +236,7 @@ function normalizeContainer(raw) {
 function mountNames(list) {
   var out = []
   if (!list || list.length === undefined) return out
-  for (var i = 0; i < list.length; i++) {
+  for (var i = 0; i < list.length && i < maxNestedItems; i++) {
     var mount = list[i]
     if (!mount || mount.Type !== "volume") continue
     var name = sanitizeLine(mount.Name || "")
@@ -239,8 +248,13 @@ function mountNames(list) {
 function networkNames(map) {
   var out = []
   if (!map || typeof map !== "object") return out
+  // for..in with a break rather than Object.keys: the key list of an object
+  // Kaj did not build is itself untrusted in size, and materializing it is the
+  // allocation this cap exists to avoid.
+  var seen = 0
   for (var key in map) {
-    if (out.length >= maxNestedItems) break
+    if (seen >= maxNestedItems) break
+    seen++
     var name = sanitizeLine(key)
     if (name !== "" && out.indexOf(name) === -1) out.push(name)
   }
@@ -274,8 +288,15 @@ function parseTime(value) {
 function normalizePorts(ports) {
   var out = []
   if (!ports || typeof ports !== "object") return out
-  var keys = Object.keys(ports).sort()
-  for (var i = 0; i < keys.length && out.length < maxNestedItems; i++) {
+  // Collected before sorting, so a container claiming a hundred thousand ports
+  // costs a hundred entries rather than a hundred thousand and a sort over them.
+  var keys = []
+  for (var key in ports) {
+    if (keys.length >= maxNestedItems) break
+    keys.push(key)
+  }
+  keys.sort()
+  for (var i = 0; i < keys.length; i++) {
     var bindings = ports[keys[i]]
     var parts = String(keys[i]).split("/")
     var containerPort = parseInt(parts[0], 10)
@@ -286,7 +307,7 @@ function normalizePorts(ports) {
     }
     // Collapse the v4/v6 pair Docker reports for one -p flag.
     var seen = {}
-    for (var j = 0; j < bindings.length && out.length < maxNestedItems; j++) {
+    for (var j = 0; j < bindings.length && j < maxNestedItems; j++) {
       var hostPort = parseInt(bindings[j] && bindings[j].HostPort, 10)
       if (!isFinite(hostPort) || seen[hostPort]) continue
       seen[hostPort] = true
