@@ -35,6 +35,11 @@ Panel {
   // Left as probing, the panel waited forever and showed nothing.
   readonly property bool serviceMissing: !kaj
   readonly property bool probing: kaj ? kaj.probing === true : false
+  // Why Docker is out of reach, and the fix that applies to this machine.
+  readonly property var advice: kaj
+    ? Model.daemonAdvice(kaj.daemonFault, kaj.dockerGroupState, kaj.daemonError)
+    : null
+  readonly property bool canOfferSudoless: kaj ? kaj.canOfferSudoless === true : false
   readonly property bool hasContainers: kaj ? kaj.totalCount > 0 : false
 
   // ---- Filter and search state ---------------------------------------------
@@ -840,9 +845,11 @@ Panel {
             spacing: Style.space(8)
             visible: !root.probing && !root.serviceMissing && (!root.installed || !root.reachable)
 
+            // The subtitle already names the state, so this says why and what to do.
             Text {
               width: parent.width
-              text: root.installed ? "Docker daemon is not running" : "Docker is not installed"
+              text: !root.installed ? "Install it with: omarchy install docker"
+                : (root.advice ? root.advice.detail : "")
               color: root.contentForeground
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.body
@@ -850,23 +857,22 @@ Panel {
               textFormat: Text.PlainText
             }
 
-            Text {
-              width: parent.width
-              text: {
-                if (!root.installed) return "Install it with: omarchy install docker"
-                var detail = root.kaj ? root.kaj.daemonError : ""
-                if (detail && detail !== "") return detail
-                return "Start it with: sudo systemctl start docker"
+            // The one fix Kaj can hand off. Starting a daemon still has no button:
+            // that needs root, and this does not. It opens Omarchy's own setup
+            // flow, which warns and asks before adding anyone to the group.
+            Button {
+              visible: root.installed && root.canOfferSudoless
+                && root.advice && root.advice.offerSudoless === true
+              text: "Turn on Sudoless Docker"
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.caption
+              onClicked: {
+                if (root.kaj) root.kaj.enableSudolessDocker()
+                root.close()
               }
-              color: root.dim
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-              textFormat: Text.PlainText
             }
-
-            // Not a button. Starting a daemon is privileged, so Kaj hands over a command
-            // rather than escalating from a bar popup.
           }
 
           // ---- Empty states ------------------------------------------------

@@ -519,6 +519,70 @@ function firstRealError(text, maxLength) {
 }
 
 // ---------------------------------------------------------------------------
+// Daemon reachability
+// ---------------------------------------------------------------------------
+
+// `which` prints one path per name it finds and nothing for the rest, so the
+// output is asked about by name instead of by line number.
+function whichFound(text, name) {
+  var lines = str(text).split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].trim().split("/").pop() === name) return true
+  }
+  return false
+}
+
+// A stopped daemon and a socket we may not open both leave Kaj with nothing to
+// show, but they need opposite fixes. Permission is tested first because that
+// message also mentions connecting.
+function daemonFault(text) {
+  var line = str(text)
+  if (/permission denied/i.test(line)) return "permission"
+  if (/connect|daemon running|no such file/i.test(line)) return "down"
+  return "unknown"
+}
+
+// Why Docker is out of reach and what to do about it. groupState is "missing"
+// when the account is not in the docker group, "pending" when it is but this
+// session began before the change, and "" when Kaj could not ask.
+function daemonAdvice(fault, groupState, detail) {
+  var text = sanitizeLine(detail, 200)
+  if (fault !== "permission") {
+    return {
+      detail: text !== "" ? text : "Start it with: sudo systemctl start docker",
+      offerSudoless: false
+    }
+  }
+  if (groupState === "pending") {
+    return {
+      detail: "Sudoless Docker is on, but groups are fixed when a session starts."
+        + " Reboot to finish.",
+      offerSudoless: false
+    }
+  }
+  if (groupState === "missing") {
+    return {
+      detail: "Omarchy keeps your user out of the docker group by default."
+        + " Sudoless Docker adds you to it, which gives anything running as you"
+        + " root on this machine.",
+      offerSudoless: true
+    }
+  }
+  return {
+    detail: text !== "" ? text : "Permission denied on the Docker socket.",
+    offerSudoless: false
+  }
+}
+
+// One line for the bar tooltip and the panel subtitle. It names the state; the
+// panel body carries the reason and the fix, so this stays short.
+function daemonSummary(fault, groupState) {
+  if (fault !== "permission") return "Docker daemon not running"
+  if (groupState === "pending") return "Docker needs a reboot to finish setup"
+  return "Kaj cannot open the Docker socket"
+}
+
+// ---------------------------------------------------------------------------
 // Search and status filtering
 // ---------------------------------------------------------------------------
 

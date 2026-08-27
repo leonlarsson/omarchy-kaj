@@ -21,6 +21,17 @@ Item {
   property bool daemonReachable: false
   property string daemonError: ""
   property bool probing: true
+  // "permission", "down" or "unknown". Set only while unreachable.
+  property string daemonFault: ""
+  // "missing", "pending", or "" when Kaj has not asked Omarchy yet.
+  property string dockerGroupState: ""
+  property bool _hasSudolessHelper: false
+  property bool _hasTerminalLauncher: false
+
+  // Read-only mode means Kaj drives nothing privileged, and the docker group is
+  // the most privileged thing on this list.
+  readonly property bool canOfferSudoless: _hasSudolessHelper && _hasTerminalLauncher
+    && dockerGroupState === "missing" && !readOnly
 
   // ---- Container state -----------------------------------------------------
   property var containers: []
@@ -40,7 +51,9 @@ Item {
   readonly property int refreshIntervalSec: Model.readSetting(settings, "refreshIntervalSec")
   readonly property int logLines: Model.readSetting(settings, "logLines")
   readonly property string summary: dockerInstalled
-    ? (daemonReachable ? Model.barSummary(containers) : "Docker daemon not running")
+    ? (daemonReachable
+        ? Model.barSummary(containers)
+        : Model.daemonSummary(daemonFault, dockerGroupState))
     : "Docker not installed"
 
   // A producer that runs past its budget is stopped mid-read and its output is
@@ -137,7 +150,10 @@ Item {
 
   function probe() {
     probing = true
-    whichProcess.command = ["which", "docker"]
+    // One lookup for everything Kaj may need to name later. The helpers are
+    // Omarchy's, so a plain Arch machine simply reports them missing.
+    whichProcess.command = ["which", "docker", "omarchy-sudo-docker",
+      "omarchy-launch-floating-terminal-with-presentation"]
     watch(whichProcess, "docker")
     whichProcess.running = true
   }
@@ -150,6 +166,26 @@ Item {
     pingProcess.command = ["docker", "version", "--format", "{{.Server.Version}}"]
     watch(pingProcess, "docker version")
     pingProcess.running = true
+  }
+
+  // Omarchy owns this answer, so Kaj asks instead of reading /etc/group itself.
+  // Exit 0 means Docker still needs sudo, exit 1 means the account is in the
+  // group and only a new session is missing.
+  function checkDockerGroup() {
+    if (!_hasSudolessHelper || groupProcess.running) return
+    groupProcess.command = ["omarchy-sudo-docker", "--configured"]
+    watch(groupProcess, "omarchy-sudo-docker")
+    groupProcess.running = true
+  }
+
+  // Kaj never elevates. This opens Omarchy's own setup flow in a terminal, where
+  // it prints the root-equivalent warning and asks before changing anything.
+  function enableSudolessDocker() {
+    if (!canOfferSudoless) return
+    Quickshell.execDetached([
+      "omarchy-launch-floating-terminal-with-presentation",
+      "omarchy-setup-security-sudoless-docker"
+    ])
   }
 
   // Two processes on purpose. One call would need docker inspect $(docker ps -aq),
@@ -599,7 +635,10 @@ Item {
     onRunningChanged: if (running) root.markRefused(whichProcess, false)
     stdout: StdioCollector {
       onStreamFinished: {
-        root.dockerInstalled = String(text || "").trim() !== ""
+        root.dockerInstalled = Model.whichFound(text, "docker")
+        root._hasSudolessHelper = Model.whichFound(text, "omarchy-sudo-docker")
+        root._hasTerminalLauncher =
+          Model.whichFound(text, "omarchy-launch-floating-terminal-with-presentation")
         if (root.dockerInstalled) root.checkDaemon()
         else root.probing = false
       }
@@ -630,6 +669,8 @@ Item {
 
       if (reachable) {
         root.daemonError = ""
+        root.daemonFault = ""
+        root.dockerGroupState = ""
         root.refresh()
         if (became) root.startStreams()
       } else {
@@ -638,10 +679,30 @@ Item {
         root.daemonError = pingProcess.failure !== ""
           ? pingProcess.failure
           : "Could not reach the Docker daemon"
+        root.daemonFault = Model.daemonFault(pingProcess.failure)
+        if (root.daemonFault === "permission") root.checkDockerGroup()
+        else root.dockerGroupState = ""
       }
 
       pingProcess.version = ""
       pingProcess.failure = ""
+    }
+  }
+
+  Process {
+    id: groupProcess
+    running: false
+    onRunningChanged: if (running) root.markRefused(groupProcess, false)
+    onExited: function (exitCode) {
+      root.unwatch(groupProcess)
+      if (root.isRefused(groupProcess)) return
+      // Only the two documented answers are believed. A killed run, or a build
+      // of the helper that means something else by exit 2, leaves the state
+      // unknown, and unknown shows Docker's own message instead of offering a
+      // fix that may not apply.
+      if (exitCode === 0) root.dockerGroupState = "missing"
+      else if (exitCode === 1) root.dockerGroupState = "pending"
+      else root.dockerGroupState = ""
     }
   }
 

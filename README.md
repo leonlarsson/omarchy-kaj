@@ -12,7 +12,15 @@ Docker containers in the Omarchy bar.
 omarchy plugin add https://github.com/leonlarsson/omarchy-kaj.git --enable
 ```
 
-Requires the `docker` CLI and a reachable daemon. To remove it:
+Requires the `docker` CLI and a socket you can open.
+
+Omarchy 4.0.1 stopped adding users to the `docker` group, so on a stock machine
+nothing can reach the daemon without a prompt. Kaj says so when it happens and
+offers to open **Setup > Security > Sudoless Docker**, which warns that the
+group is root-equivalent, asks, and then applies on the next boot. Rootless
+Docker is the other way round; see [Security](#security).
+
+To remove it:
 
 ```bash
 omarchy plugin remove mozzy.kaj
@@ -107,11 +115,16 @@ long-lived shell process, so:
   is the traversal of the nested values inside it. Live stats are keyed only to
   containers the last snapshot listed, and events, stats records and
   notifications are each capped per second.
-- Kaj never calls `sudo` or `pkexec`.
+- Kaj never calls `sudo` or `pkexec`. When the socket is closed to you it can
+  open Omarchy's own Sudoless Docker setup in a terminal, and that script does
+  the asking and the elevating. Kaj hides the offer in read-only mode.
 
 [Rootless Docker](https://docs.docker.com/engine/security/rootless/) avoids the
-root-equivalence entirely. Kaj honours `DOCKER_HOST`. Please open an issue for
-security reports.
+root-equivalence entirely, and Kaj needs no change to use it: the Docker CLI
+reads its context from `~/.docker/config.json`. Kaj also honours `DOCKER_HOST`,
+but the shell runs as a systemd user service and never reads your shell profile,
+so set it with `systemctl --user set-environment` or use a context. Please open
+an issue for security reports.
 
 ## Development
 

@@ -463,6 +463,73 @@ test("firstRealError caps length and handles empty input", () => {
   assert.ok(model.firstRealError("x".repeat(500)).length <= 201);
 });
 
+// --- Daemon reachability ----------------------------------------------------
+
+test("whichFound reads one name out of a multi-name which", () => {
+  const out = "/usr/bin/docker\n/usr/share/omarchy/bin/omarchy-sudo-docker\n";
+  assert.equal(model.whichFound(out, "docker"), true);
+  assert.equal(model.whichFound(out, "omarchy-sudo-docker"), true);
+  assert.equal(
+    model.whichFound(out, "omarchy-launch-floating-terminal-with-presentation"),
+    false
+  );
+});
+
+test("whichFound does not match on a name ending", () => {
+  // omarchy-sudo-docker must never be read as docker.
+  assert.equal(model.whichFound("/usr/share/omarchy/bin/omarchy-sudo-docker\n", "docker"), false);
+});
+
+test("daemonFault separates a closed socket from a stopped daemon", () => {
+  assert.equal(
+    model.daemonFault(
+      "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
+    ),
+    "permission"
+  );
+  assert.equal(
+    model.daemonFault(
+      "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path"
+      + " is correct and if the daemon is running: dial unix: connect: no such file or directory"
+    ),
+    "down"
+  );
+  assert.equal(
+    model.daemonFault("Cannot connect to the Docker daemon. Is the docker daemon running?"),
+    "down"
+  );
+  assert.equal(model.daemonFault(""), "unknown");
+});
+
+test("daemonAdvice offers sudoless Docker only when the group is the problem", () => {
+  const missing = model.daemonAdvice("permission", "missing", "permission denied");
+  assert.equal(missing.offerSudoless, true);
+
+  const pending = model.daemonAdvice("permission", "pending", "permission denied");
+  assert.equal(pending.offerSudoless, false);
+  assert.match(pending.detail, /reboot/i);
+
+  // Not an Omarchy machine, so Kaj never learned the group state.
+  const unknown = model.daemonAdvice("permission", "", "permission denied on the socket");
+  assert.equal(unknown.offerSudoless, false);
+  assert.equal(unknown.detail, "permission denied on the socket");
+
+  const down = model.daemonAdvice("down", "missing", "");
+  assert.equal(down.offerSudoless, false);
+  assert.match(down.detail, /systemctl start docker/);
+});
+
+test("daemonAdvice keeps the daemon message when there is one", () => {
+  const out = model.daemonAdvice("down", "", "failed to connect to the docker API");
+  assert.equal(out.detail, "failed to connect to the docker API");
+});
+
+test("daemonSummary names the fix in one line", () => {
+  assert.equal(model.daemonSummary("permission", "pending"), "Docker needs a reboot to finish setup");
+  assert.equal(model.daemonSummary("permission", "missing"), "Kaj cannot open the Docker socket");
+  assert.equal(model.daemonSummary("down", ""), "Docker daemon not running");
+});
+
 // --- Action feedback --------------------------------------------------------
 
 test("intendedAction is separate from whether the action can run", () => {
