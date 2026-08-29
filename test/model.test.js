@@ -530,6 +530,24 @@ test("daemonSummary names the fix in one line", () => {
   assert.equal(model.daemonSummary("down", ""), "Docker daemon not running");
 });
 
+test("daemonRetryDelayMs backs off from base and holds at the ceiling", () => {
+  assert.equal(model.daemonRetryDelayMs(1), 2000);
+  assert.equal(model.daemonRetryDelayMs(2), 4000);
+  assert.equal(model.daemonRetryDelayMs(3), 8000);
+  assert.equal(model.daemonRetryDelayMs(4), 16000);
+  // 2000 * 2^4 is 32000, past the ceiling.
+  assert.equal(model.daemonRetryDelayMs(5), 30000);
+  assert.equal(model.daemonRetryDelayMs(50), 30000);
+});
+
+test("daemonRetryDelayMs never returns zero or NaN for a bad attempt", () => {
+  assert.equal(model.daemonRetryDelayMs(0), 2000);
+  assert.equal(model.daemonRetryDelayMs(-3), 2000);
+  assert.equal(model.daemonRetryDelayMs(NaN), 2000);
+  assert.equal(model.daemonRetryDelayMs(undefined), 2000);
+  assert.equal(model.daemonRetryDelayMs(1.9), 2000);
+});
+
 // --- Action feedback --------------------------------------------------------
 
 test("intendedAction is separate from whether the action can run", () => {

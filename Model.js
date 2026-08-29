@@ -118,6 +118,26 @@ var actionDeadlineMs = 120000
 // is recycled once its buffer reaches this size.
 var maxStreamBufferBytes = 1024 * 1024
 
+// The Docker daemon is not always up when the shell starts: a `docker context`
+// that tunnels to another host waits on SSH and its agent, a rootless daemon
+// waits on the user session, a laptop may just be off the network. One failed
+// probe is not a verdict, so Kaj keeps re-checking. The delay doubles from base
+// to ceiling: a daemon that is genuinely gone is polled gently, while one held
+// up by a login step is picked up within seconds.
+var daemonRetryBaseMs = 2000
+var daemonRetryCeilingMs = 30000
+
+// attempt is 1 on the first retry. 0, a negative, or a non-number all mean the
+// base delay, never zero and never NaN, so a caller cannot schedule a tight
+// loop by mistake.
+function daemonRetryDelayMs(attempt) {
+  var n = Math.floor(attempt)
+  if (!isFinite(n) || n <= 1) return daemonRetryBaseMs
+  var delay = daemonRetryBaseMs * Math.pow(2, n - 1)
+  if (!isFinite(delay) || delay > daemonRetryCeilingMs) return daemonRetryCeilingMs
+  return delay
+}
+
 function overBudget(text, limit) {
   return str(text).length > (limit === undefined ? maxOutputBytes : limit)
 }
