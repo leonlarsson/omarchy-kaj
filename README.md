@@ -74,6 +74,17 @@ loop over containers, so networks and dependency order are Compose's to handle.
 `down` is confirmed first. `up` is not offered: it needs the compose file, which
 Kaj cannot rely on still being where it was.
 
+## Reconnecting
+
+The daemon is often not reachable the instant the shell starts: a `docker
+context` that tunnels to another host is waiting on SSH and its agent (an
+unlocked keyring, a hardware key, a password manager), a rootless daemon is
+waiting on the user session, a laptop is still off the network. Kaj does not
+treat the first failed check as final. It re-probes on a widening delay, from
+2s up to 30s, and connects on its own once Docker answers. The panel shows the
+reason and the next retry while it waits. The same backoff covers a daemon that
+restarts or goes away mid-session.
+
 ## Settings
 
 Set per widget with `omarchy bar set mozzy.kaj <key> <value> --json`, or in

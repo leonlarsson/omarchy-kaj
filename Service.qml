@@ -27,6 +27,11 @@ Item {
   property string dockerGroupState: ""
   property bool _hasSudolessHelper: false
   property bool _hasTerminalLauncher: false
+  // Consecutive failed reachability probes. Kaj re-checks on a widening delay
+  // rather than sitting on the first failure until the panel is toggled: the
+  // daemon is often just a login step behind at startup. Reset to 0 the moment
+  // a probe succeeds.
+  property int daemonRetryAttempt: 0
 
   // Read-only mode means Kaj drives nothing privileged, and the docker group is
   // the most privileged thing on this list.
@@ -166,6 +171,22 @@ Item {
     pingProcess.command = ["docker", "version", "--format", "{{.Server.Version}}"]
     watch(pingProcess, "docker version")
     pingProcess.running = true
+  }
+
+  // Queue another probe after a failed one, or after a live stream dropped
+  // because the daemon went away. The delay widens with each consecutive miss
+  // (Model.daemonRetryDelayMs) and is reset by the first success. This is the
+  // one path that brings Kaj back once Docker becomes reachable.
+  function scheduleDaemonRetry() {
+    daemonRetryAttempt = daemonRetryAttempt + 1
+    reconnectTimer.interval = Model.daemonRetryDelayMs(daemonRetryAttempt)
+    reconnectTimer.restart()
+  }
+
+  function clearDaemonRetry() {
+    daemonRetryAttempt = 0
+    reconnectTimer.stop()
+    reconnectTimer.interval = Model.daemonRetryDelayMs(0)
   }
 
   // Omarchy owns this answer, so Kaj asks instead of reading /etc/group itself.
@@ -671,17 +692,23 @@ Item {
         root.daemonError = ""
         root.daemonFault = ""
         root.dockerGroupState = ""
+        root.clearDaemonRetry()
         root.refresh()
         if (became) root.startStreams()
       } else {
         // A stopped daemon reports on stderr. Keep the text: a permission problem and a
         // stopped daemon need different fixes.
-        root.daemonError = pingProcess.failure !== ""
+        var reason = pingProcess.failure !== ""
           ? pingProcess.failure
           : "Could not reach the Docker daemon"
         root.daemonFault = Model.daemonFault(pingProcess.failure)
         if (root.daemonFault === "permission") root.checkDockerGroup()
         else root.dockerGroupState = ""
+        // Keep trying. The daemon is often reachable a few seconds later once a
+        // context, an SSH agent, or a group change settles.
+        root.scheduleDaemonRetry()
+        root.daemonError = reason + " — retrying in "
+          + Math.round(reconnectTimer.interval / 1000) + "s"
       }
 
       pingProcess.version = ""
@@ -818,9 +845,10 @@ Item {
       }
     }
     onExited: function () {
-      // A daemon restart ends the stream. Re-probe instead of going stale.
+      // A daemon restart ends the stream. Re-probe instead of going stale, and
+      // keep re-probing on a backoff if it does not come straight back.
       root.daemonReachable = false
-      reconnectTimer.restart()
+      root.scheduleDaemonRetry()
     }
   }
 
@@ -1009,9 +1037,13 @@ Item {
     onTriggered: root.syncStatsStream()
   }
 
+  // Re-probes a daemon that was unreachable at the last check. One-shot:
+  // scheduleDaemonRetry() sets the interval and arms it again after each miss,
+  // and a successful probe stops it. checkDaemon() no-ops while a probe is
+  // already in flight, and that probe's own result reschedules.
   Timer {
     id: reconnectTimer
-    interval: 3000
+    interval: Model.daemonRetryBaseMs
     repeat: false
     onTriggered: root.checkDaemon()
   }
